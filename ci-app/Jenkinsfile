@@ -33,9 +33,28 @@ pipeline {
                 echo '=== Analyse SonarQube ==='
                 dir('ci-app') {
                     withSonarQubeEnv('SonarQube') {
-                        withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
-                            sh 'mvn sonar:sonar -Dsonar.token=$SONAR_TOKEN'
-                        }
+                        sh 'mvn sonar:sonar'
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Nexus') {
+            steps {
+                echo '=== Déploiement vers Nexus ==='
+                dir('ci-app') {
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'nexus-credentials',
+                            usernameVariable: 'NEXUS_USERNAME',
+                            passwordVariable: 'NEXUS_PASSWORD'
+                        )
+                    ]) {
+                        sh '''
+                            mvn deploy \
+                            -Dnexus.username="$NEXUS_USERNAME" \
+                            -Dnexus.password="$NEXUS_PASSWORD"
+                        '''
                     }
                 }
             }
