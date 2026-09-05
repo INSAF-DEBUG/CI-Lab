@@ -2,37 +2,47 @@ pipeline {
     agent any
 
     stages {
+
         stage('Checkout') {
             steps {
+                echo '=== Récupération du code Git ==='
                 checkout scm
             }
         }
 
         stage('Build') {
             steps {
-                sh 'mvn clean package -DskipTests'
+                echo '=== Build Maven ==='
+                dir('ci-app') {
+                    sh 'mvn clean package -DskipTests'
+                }
             }
         }
 
         stage('Tests') {
             steps {
-                sh 'mvn test'
+                echo '=== Tests Maven ==='
+                dir('ci-app') {
+                    sh 'mvn test'
+                }
             }
         }
 
         stage('Archive') {
             steps {
-                archiveArtifacts artifacts: 'target/**/*', fingerprint: true
+                echo '=== Archivage du WAR ==='
+                archiveArtifacts artifacts: 'ci-app/target/*.war', fingerprint: true
             }
         }
     }
 
     post {
         success {
-            echo 'CI SUCCESS'
+            echo '=== CI SUCCESS ==='
         }
+
         failure {
-            echo 'CI FAILURE'
+            echo '=== CI FAILURE ==='
         }
     }
 }
