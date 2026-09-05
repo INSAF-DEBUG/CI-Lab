@@ -1,11 +1,11 @@
-pipeline {
+kpipeline {
     agent any
 
     stages {
 
         stage('Checkout') {
             steps {
-                echo '=== Récupération du code Git ==='
+                echo '=== Checkout Git ==='
                 checkout scm
             }
         }
@@ -30,8 +30,8 @@ pipeline {
 
         stage('Archive') {
             steps {
-                echo '=== Archivage du WAR ==='
-                archiveArtifacts artifacts: 'ci-app/target/*.war', fingerprint: true
+                echo '=== Archivage du JAR ==='
+                archiveArtifacts artifacts: 'ci-app/target/*.jar', fingerprint: true
             }
         }
     }
