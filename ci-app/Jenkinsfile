@@ -28,6 +28,17 @@ pipeline {
             }
         }
 
+        stage('SonarQube Analysis') {
+            steps {
+                echo '=== Analyse SonarQube ==='
+                dir('ci-app') {
+                    withSonarQubeEnv('SonarQube') {
+                        sh 'mvn sonar:sonar'
+                    }
+                }
+            }
+        }
+
         stage('Archive') {
             steps {
                 echo '=== Archivage du JAR ==='
