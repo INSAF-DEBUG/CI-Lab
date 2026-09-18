@@ -10,29 +10,41 @@
     <groupId>com.insaf.cilab</groupId>
     <artifactId>ci-app</artifactId>
     <version>1.0-SNAPSHOT</version>
-    <packaging>jar</packaging>
+    <packaging>war</packaging>
 
     <name>ci-app</name>
     <url>http://maven.apache.org</url>
 
-    <!-- Configuration Java -->
     <properties>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.compiler.source>8</maven.compiler.source>
-        <maven.compiler.target>8</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.source>8</maven.compiler.source>
+    <maven.compiler.target>8</maven.compiler.target>
+
+    <!-- Rapport de couverture JaCoCo pour SonarQube -->
+    <sonar.coverage.jacoco.xmlReportPaths>
+        target/site/jacoco/jacoco.xml
+    </sonar.coverage.jacoco.xmlReportPaths>
     </properties>
 
-    <!-- Dépendances -->
     <dependencies>
+
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
             <version>3.8.1</version>
             <scope>test</scope>
         </dependency>
+        
+        <dependency>
+            <groupId>org.seleniumhq.selenium</groupId>
+            <artifactId>selenium-java</artifactId>
+            <version>4.8.3</version>
+            <scope>test</scope>
+        </dependency>
+
+
     </dependencies>
 
-    <!-- Déploiement vers Nexus -->
     <distributionManagement>
         <snapshotRepository>
             <id>nexus-snapshots</id>
@@ -40,16 +52,43 @@
         </snapshotRepository>
     </distributionManagement>
 
-    <!-- Plugin SonarQube -->
     <build>
         <plugins>
+
+            <!-- SonarQube -->
             <plugin>
                 <groupId>org.sonarsource.scanner.maven</groupId>
                 <artifactId>sonar-maven-plugin</artifactId>
                 <version>3.9.1.2184</version>
             </plugin>
+
+            <!-- JaCoCo -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.12</version>
+
+                <executions>
+
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+
+                </executions>
+            </plugin>
+
         </plugins>
     </build>
 
 </project>
-

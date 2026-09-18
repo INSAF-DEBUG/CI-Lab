@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>CI Lab - Gestion des tâches</title>
+</head>
+<body>
+
+    <h1>Gestion des tâches</h1>
+
+    <label for="title">Titre de la tâche :</label>
+    <input type="text" id="title">
+
+    <button id="addTask">Ajouter</button>
+
+    <h2>Liste des tâches</h2>
+
+    <ul id="taskList"></ul>
+
+</body>
+</html>
