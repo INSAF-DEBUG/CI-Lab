@@ -16,14 +16,15 @@
     <url>http://maven.apache.org</url>
 
     <properties>
-    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <maven.compiler.source>8</maven.compiler.source>
-    <maven.compiler.target>8</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-    <!-- Rapport de couverture JaCoCo pour SonarQube -->
-    <sonar.coverage.jacoco.xmlReportPaths>
-        target/site/jacoco/jacoco.xml
-    </sonar.coverage.jacoco.xmlReportPaths>
+        <maven.compiler.source>8</maven.compiler.source>
+        <maven.compiler.target>8</maven.compiler.target>
+
+        <!-- Rapport de couverture JaCoCo pour SonarQube -->
+        <sonar.coverage.jacoco.xmlReportPaths>
+            target/site/jacoco/jacoco.xml
+        </sonar.coverage.jacoco.xmlReportPaths>
     </properties>
 
     <dependencies>
@@ -34,14 +35,13 @@
             <version>3.8.1</version>
             <scope>test</scope>
         </dependency>
-        
+
         <dependency>
             <groupId>org.seleniumhq.selenium</groupId>
             <artifactId>selenium-java</artifactId>
             <version>4.8.3</version>
             <scope>test</scope>
         </dependency>
-
 
     </dependencies>
 
@@ -88,7 +88,15 @@
                 </executions>
             </plugin>
 
+            <!-- Maven WAR -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-war-plugin</artifactId>
+                <version>3.2.3</version>
+            </plugin>
+
         </plugins>
     </build>
 
 </project>
+
