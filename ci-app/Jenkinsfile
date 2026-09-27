@@ -5,9 +5,10 @@ pipeline {
     }
 
     environment {
-        JAVA_HOME = '/opt/java/jdk-21.0.4+7'
-        PATH = "${JAVA_HOME}/bin:${env.PATH}"
+    JAVA_HOME = '/opt/java/jdk-17.0.20.1+1'
+    PATH = "${JAVA_HOME}/bin:${env.PATH}"
     }
+
 
     stages {
 
@@ -44,25 +45,19 @@ pipeline {
         stage('Build') {
             steps {
                 echo '=== Build Maven ==='
-
-                dir('ci-app') {
-                    sh '''
-                        mvn clean package -DskipTests
-                    '''
-                }
+                sh '''
+                    mvn clean package -DskipTests
+                '''
             }
         }
 
         stage('Tests') {
             steps {
                 echo '=== Tests Maven ==='
-
-                dir('ci-app') {
-                    sh '''
-                        export MOZ_HEADLESS=1
-                        mvn test
-                    '''
-                }
+                sh '''
+                    export MOZ_HEADLESS=1
+                    mvn test
+                '''
             }
         }
 
@@ -70,22 +65,20 @@ pipeline {
             steps {
                 echo '=== Analyse SonarQube ==='
 
-                dir('ci-app') {
-                    withSonarQubeEnv('SonarQube') {
-                        sh '''
-                            echo "=== Java utilisé pour SonarQube ==="
-                            echo "JAVA_HOME=$JAVA_HOME"
-                            java -version
+                withSonarQubeEnv('SonarQube') {
+                    sh '''
+                        echo "=== Java utilisé pour SonarQube ==="
+                        echo "JAVA_HOME=$JAVA_HOME"
+                        java -version
 
-                            echo "=== Maven utilisé pour SonarQube ==="
-                            mvn -version
+                        echo "=== Maven utilisé pour SonarQube ==="
+                        mvn -version
 
-                            echo "=== Analyse SonarQube ==="
+                        echo "=== Analyse SonarQube ==="
 
-                            mvn sonar:sonar \
-                              -Dsonar.exclusions="**/target/**,**/*.js,**/*.ts,**/*.css"
-                        '''
-                    }
+                        mvn sonar:sonar \
+                          -Dsonar.exclusions="**/target/**,**/*.js,**/*.ts,**/*.css"
+                    '''
                 }
             }
         }
@@ -103,12 +96,9 @@ pipeline {
         stage('Deploy to Nexus') {
             steps {
                 echo '=== Deploy vers Nexus ==='
-
-                dir('ci-app') {
-                    sh '''
-                        mvn deploy -DskipTests
-                    '''
-                }
+                sh '''
+                    mvn deploy -DskipTests
+                '''
             }
         }
 
@@ -131,10 +121,10 @@ pipeline {
             steps {
                 echo '=== Archivage des artefacts ==='
 
-                archiveArtifacts artifacts: 'ci-app/target/*.war',
+                archiveArtifacts artifacts: 'target/*.war',
                                  allowEmptyArchive: true
 
-                archiveArtifacts artifacts: 'ci-app/target/site/jacoco/**/*',
+                archiveArtifacts artifacts: 'target/site/jacoco/**/*',
                                  allowEmptyArchive: true
             }
         }
@@ -145,7 +135,7 @@ pipeline {
             echo '=== Pipeline terminé ==='
 
             junit(
-                testResults: 'ci-app/target/surefire-reports/*.xml',
+                testResults: 'target/surefire-reports/*.xml',
                 allowEmptyResults: true
             )
         }
@@ -161,5 +151,4 @@ pipeline {
         }
     }
 }
-o
 
