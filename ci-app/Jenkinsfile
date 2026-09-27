@@ -65,7 +65,7 @@ pipeline {
                 echo '=== Test de charge JMeter ==='
 
                 sh '''
-                    ssh -o BatchMode=yes insaf@192.168.42.172 \
+                    ssh -o BatchMode=yes insaf@192.168.42.183 \
                     "sudo -u jmeterapp /opt/jmeter/bin/jmeter -n \
                     -t /home/insaf/CI-Lab/tests/jmeter/ci-app-load-test.jmx \
                     -l /home/insaf/jmeter-jenkins-results/jenkins-jmeter.jtl \
@@ -73,8 +73,11 @@ pipeline {
                 '''
 
                 sh '''
-                    scp insaf@192.168.42.172:/home/insaf/jmeter-jenkins-results/jenkins-jmeter.jtl .
-                    scp insaf@192.168.42.172:/home/insaf/jmeter-jenkins-results/jenkins-jmeter.log .
+                    scp -o BatchMode=yes \
+                    insaf@192.168.42.183:/home/insaf/jmeter-jenkins-results/jenkins-jmeter.jtl .
+
+                    scp -o BatchMode=yes \
+                    insaf@192.168.42.183:/home/insaf/jmeter-jenkins-results/jenkins-jmeter.log .
                 '''
 
                 archiveArtifacts artifacts: 'jenkins-jmeter.jtl,jenkins-jmeter.log', fingerprint: true
@@ -99,3 +102,4 @@ pipeline {
         }
     }
 }
+
