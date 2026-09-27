@@ -1,5 +1,7 @@
 pipeline {
-    agent any
+    agent {
+        label 'centos-build'
+    }
 
     stages {
 
@@ -13,6 +15,7 @@ pipeline {
         stage('Build') {
             steps {
                 echo '=== Build Maven ==='
+
                 dir('ci-app') {
                     sh 'mvn clean package -DskipTests'
                 }
@@ -22,8 +25,12 @@ pipeline {
         stage('Tests') {
             steps {
                 echo '=== Tests Maven ==='
+
                 dir('ci-app') {
-                    sh 'mvn test'
+                    sh '''
+                        export MOZ_HEADLESS=1
+                        mvn test
+                    '''
                 }
             }
         }
@@ -31,6 +38,7 @@ pipeline {
         stage('SonarQube Analysis') {
             steps {
                 echo '=== Analyse SonarQube ==='
+
                 dir('ci-app') {
                     withSonarQubeEnv('SonarQube') {
                         sh 'mvn sonar:sonar'
@@ -42,6 +50,7 @@ pipeline {
         stage('Deploy to Nexus') {
             steps {
                 echo '=== Déploiement vers Nexus ==='
+
                 dir('ci-app') {
                     withCredentials([
                         usernamePassword(
@@ -80,14 +89,19 @@ pipeline {
                     insaf@192.168.42.183:/home/insaf/jmeter-jenkins-results/jenkins-jmeter.log .
                 '''
 
-                archiveArtifacts artifacts: 'jenkins-jmeter.jtl,jenkins-jmeter.log', fingerprint: true
+                archiveArtifacts \
+                    artifacts: 'jenkins-jmeter.jtl,jenkins-jmeter.log', \
+                    fingerprint: true
             }
         }
 
         stage('Archive') {
             steps {
-                echo '=== Archivage du JAR ==='
-                archiveArtifacts artifacts: 'ci-app/target/*.jar', fingerprint: true
+                echo '=== Archivage du WAR ==='
+
+                archiveArtifacts \
+                    artifacts: 'ci-app/target/*.war', \
+                    fingerprint: true
             }
         }
     }
@@ -99,6 +113,10 @@ pipeline {
 
         failure {
             echo '=== CI FAILURE ==='
+        }
+
+        always {
+            echo '=== Pipeline terminé ==='
         }
     }
 }
