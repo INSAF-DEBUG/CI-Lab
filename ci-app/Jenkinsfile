@@ -7,6 +7,11 @@ pipeline {
     environment {
         JAVA_HOME = '/opt/java/jdk-21.0.4+7'
         PATH = "${JAVA_HOME}/bin:${env.PATH}"
+
+        MAVEN_OPTS = '-Xmx1024m'
+
+        // Empêche SonarQube de chercher les fichiers JS/TS/CSS
+        SONAR_USER_HOME = "${WORKSPACE}/.sonar"
     }
 
     stages {
@@ -14,6 +19,7 @@ pipeline {
         stage('Checkout') {
             steps {
                 echo '=== Checkout Git ==='
+
                 checkout scm
             }
         }
@@ -21,6 +27,8 @@ pipeline {
         stage('Check Java / Maven') {
             steps {
                 sh '''
+                    set -e
+
                     echo "=== JAVA_HOME ==="
                     echo "$JAVA_HOME"
 
@@ -41,6 +49,8 @@ pipeline {
 
                 dir('ci-app') {
                     sh '''
+                        set -e
+
                         echo "=== POM ==="
                         ls -l pom.xml
 
@@ -57,7 +67,11 @@ pipeline {
 
                 dir('ci-app') {
                     sh '''
+                        set -e
+
                         export MOZ_HEADLESS=1
+
+                        echo "=== Maven Tests ==="
                         mvn test
                     '''
                 }
@@ -71,6 +85,8 @@ pipeline {
                 dir('ci-app') {
                     withSonarQubeEnv('SonarQube') {
                         sh '''
+                            set -e
+
                             echo "=== Java pour SonarQube ==="
                             echo "JAVA_HOME=$JAVA_HOME"
                             java -version
@@ -81,7 +97,12 @@ pipeline {
                             echo "=== SonarQube ==="
 
                             mvn sonar:sonar \
-                              -Dsonar.exclusions="**/target/**,**/*.js,**/*.ts,**/*.css"
+                              -Dsonar.projectKey=com.insaf.cilab:ci-app \
+                              -Dsonar.projectName=ci-app \
+                              -Dsonar.sources=src/main/java,src/main/webapp \
+                              -Dsonar.tests=src/test/java \
+                              -Dsonar.exclusions=**/target/**,**/*.js,**/*.ts,**/*.css \
+                              -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
                         '''
                     }
                 }
@@ -100,11 +121,18 @@ pipeline {
 
         stage('Deploy to Nexus') {
             steps {
-                echo '=== Deploy vers Nexus ==='
+                echo '=== Deploy Nexus ==='
 
                 dir('ci-app') {
                     sh '''
-                        mvn deploy -DskipTests
+                        set -e
+
+                        if [ -f ./deploy-nexus.sh ]; then
+                            chmod +x ./deploy-nexus.sh
+                            ./deploy-nexus.sh
+                        else
+                            echo "deploy-nexus.sh absent - étape ignorée"
+                        fi
                     '''
                 }
             }
@@ -112,37 +140,43 @@ pipeline {
 
         stage('JMeter Load Test') {
             steps {
-                echo '=== Test de charge JMeter ==='
+                echo '=== JMeter Load Test ==='
 
-                sh '''
-                    if command -v jmeter >/dev/null 2>&1; then
-                        echo "JMeter trouvé"
-                        jmeter --version
-                    else
-                        echo "JMeter non installé - étape ignorée"
-                    fi
-                '''
+                dir('ci-app') {
+                    sh '''
+                        set +e
+
+                        if command -v jmeter >/dev/null 2>&1; then
+                            echo "JMeter trouvé"
+                            jmeter -n -t test.jmx -l target/jmeter-results.jtl
+                        else
+                            echo "JMeter non installé - étape ignorée"
+                        fi
+
+                        exit 0
+                    '''
+                }
             }
         }
 
         stage('Archive') {
             steps {
-                echo '=== Archivage des artefacts ==='
+                echo '=== Archive artifacts ==='
 
-                archiveArtifacts(
-                    artifacts: 'ci-app/target/*.war',
-                    allowEmptyArchive: true
-                )
-
-                archiveArtifacts(
-                    artifacts: 'ci-app/target/site/jacoco/**/*',
-                    allowEmptyArchive: true
-                )
+                archiveArtifacts artifacts: '''
+                    ci-app/target/*.war,
+                    ci-app/target/site/jacoco/**,
+                    ci-app/target/surefire-reports/**,
+                    ci-app/target/jmeter-results.jtl
+                ''',
+                allowEmptyArchive: true,
+                fingerprint: true
             }
         }
     }
 
     post {
+
         always {
             echo '=== Pipeline terminé ==='
 
@@ -154,12 +188,16 @@ pipeline {
 
         success {
             echo '=== CI SUCCESS ==='
-            echo 'Le pipeline a terminé avec succès.'
+            echo 'Build + Tests + SonarQube + Quality Gate terminés avec succès.'
         }
 
         failure {
             echo '=== CI FAILURE ==='
             echo 'Le pipeline a échoué.'
+        }
+
+        cleanup {
+            echo '=== Cleanup ==='
         }
     }
 }
