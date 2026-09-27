@@ -1,4 +1,4 @@
-kpipeline {
+pipeline {
 
     agent {
         label 'centos-build'
