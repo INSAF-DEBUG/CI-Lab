@@ -1,16 +1,10 @@
 pipeline {
 
-    agent {
-        label 'centos-build'
-    }
+    agent any
 
     environment {
-        // Java utilisé par l'agent Jenkins
         JAVA_HOME = '/opt/java/jdk-21.0.4+7'
         PATH = "${JAVA_HOME}/bin:${env.PATH}"
-
-        // À ADAPTER avec l'URL réelle de ton application
-        // Exemple : APP_URL = 'http://192.168.1.100:8080/ci-app'
     }
 
     stages {
@@ -51,9 +45,7 @@ pipeline {
                 echo '=== Build Maven ==='
 
                 dir('ci-app') {
-                    sh '''
-                        mvn clean package -DskipTests
-                    '''
+                    sh 'mvn clean package -DskipTests'
                 }
             }
         }
@@ -65,7 +57,7 @@ pipeline {
                 dir('ci-app') {
                     sh '''
                         export MOZ_HEADLESS=1
-                        mvn test
+                        MOZ_HEADLESS=1 mvn test
                     '''
                 }
             }
@@ -86,13 +78,9 @@ pipeline {
                             mvn -version
 
                             echo "=== Analyse SonarQube ==="
+
                             mvn sonar:sonar \
-  -Dsonar.exclusions="**/target/**,**/*.js,**/*.ts,**/*.css" \
-  -Dsonar.javascript.file.suffixes=- \
-  -Dsonar.typescript.file.suffixes=-
-
-
-
+                              -Dsonar.exclusions="**/target/**"
                         '''
                     }
                 }
@@ -101,7 +89,7 @@ pipeline {
 
         stage('Quality Gate') {
             steps {
-                echo '=== Vérification Quality Gate ==='
+                echo '=== Quality Gate SonarQube ==='
 
                 timeout(time: 5, unit: 'MINUTES') {
                     waitForQualityGate abortPipeline: true
@@ -111,12 +99,10 @@ pipeline {
 
         stage('Deploy to Nexus') {
             steps {
-                echo '=== Déploiement vers Nexus ==='
+                echo '=== Deploy vers Nexus ==='
 
                 dir('ci-app') {
-                    sh '''
-                        mvn deploy -DskipTests
-                    '''
+                    sh 'mvn deploy -DskipTests'
                 }
             }
         }
@@ -126,13 +112,8 @@ pipeline {
                 echo '=== Test de charge JMeter ==='
 
                 sh '''
-                    if command -v jmeter >/dev/null 2>&1; then
-                        echo "JMeter trouvé :"
-                        jmeter --version
-                    else
-                        echo "JMeter non installé sur l'agent."
-                        echo "Stage ignoré."
-                    fi
+                    echo "=== JMeter Load Test ==="
+                    echo "Test JMeter à exécuter selon la configuration du projet"
                 '''
             }
         }
@@ -142,28 +123,30 @@ pipeline {
                 echo '=== Archivage ==='
 
                 archiveArtifacts artifacts: 'ci-app/target/*.war',
-                                 fingerprint: true
+                                 fingerprint: true,
+                                 allowEmptyArchive: true
             }
         }
     }
 
     post {
+        always {
+            echo '=== Pipeline terminé ==='
+
+            junit(
+                testResults: 'ci-app/target/surefire-reports/*.xml',
+                allowEmptyResults: true
+            )
+        }
 
         success {
             echo '=== CI SUCCESS ==='
-            echo 'Pipeline terminé avec succès.'
+            echo 'Le pipeline a réussi.'
         }
 
         failure {
             echo '=== CI FAILURE ==='
             echo 'Le pipeline a échoué.'
-        }
-
-        always {
-            echo '=== Pipeline terminé ==='
-
-            junit allowEmptyResults: true,
-                  testResults: 'ci-app/target/surefire-reports/*.xml'
         }
     }
 }
