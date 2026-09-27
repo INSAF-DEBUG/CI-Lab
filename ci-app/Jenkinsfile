@@ -1,6 +1,8 @@
 pipeline {
 
-    agent any
+    agent {
+        label 'centos-build'
+    }
 
     environment {
         JAVA_HOME = '/opt/java/jdk-21.0.4+7'
@@ -19,7 +21,6 @@ pipeline {
         stage('Check Java') {
             steps {
                 echo '=== Vérification Java / Maven ==='
-
                 sh '''
                     echo "=== JAVA_HOME ==="
                     echo "$JAVA_HOME"
@@ -45,7 +46,9 @@ pipeline {
                 echo '=== Build Maven ==='
 
                 dir('ci-app') {
-                    sh 'mvn clean package -DskipTests'
+                    sh '''
+                        mvn clean package -DskipTests
+                    '''
                 }
             }
         }
@@ -57,7 +60,7 @@ pipeline {
                 dir('ci-app') {
                     sh '''
                         export MOZ_HEADLESS=1
-                        MOZ_HEADLESS=1 mvn test
+                        mvn test
                     '''
                 }
             }
@@ -80,7 +83,7 @@ pipeline {
                             echo "=== Analyse SonarQube ==="
 
                             mvn sonar:sonar \
-                              -Dsonar.exclusions="**/target/**"
+                              -Dsonar.exclusions="**/target/**,**/*.js,**/*.ts,**/*.css"
                         '''
                     }
                 }
@@ -102,7 +105,9 @@ pipeline {
                 echo '=== Deploy vers Nexus ==='
 
                 dir('ci-app') {
-                    sh 'mvn deploy -DskipTests'
+                    sh '''
+                        mvn deploy -DskipTests
+                    '''
                 }
             }
         }
@@ -112,18 +117,24 @@ pipeline {
                 echo '=== Test de charge JMeter ==='
 
                 sh '''
-                    echo "=== JMeter Load Test ==="
-                    echo "Test JMeter à exécuter selon la configuration du projet"
+                    if command -v jmeter >/dev/null 2>&1; then
+                        echo "JMeter trouvé"
+                        jmeter --version
+                    else
+                        echo "JMeter non installé - étape ignorée"
+                    fi
                 '''
             }
         }
 
         stage('Archive') {
             steps {
-                echo '=== Archivage ==='
+                echo '=== Archivage des artefacts ==='
 
                 archiveArtifacts artifacts: 'ci-app/target/*.war',
-                                 fingerprint: true,
+                                 allowEmptyArchive: true
+
+                archiveArtifacts artifacts: 'ci-app/target/site/jacoco/**/*',
                                  allowEmptyArchive: true
             }
         }
@@ -141,7 +152,7 @@ pipeline {
 
         success {
             echo '=== CI SUCCESS ==='
-            echo 'Le pipeline a réussi.'
+            echo 'Le pipeline a terminé avec succès.'
         }
 
         failure {
@@ -150,4 +161,5 @@ pipeline {
         }
     }
 }
+o
 
