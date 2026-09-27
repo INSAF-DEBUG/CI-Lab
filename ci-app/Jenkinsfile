@@ -87,7 +87,10 @@ pipeline {
 
                             echo "=== Analyse SonarQube ==="
                             mvn sonar:sonar \
-  -Dsonar.exclusions="**/target/**,**/*.js,**/*.ts,**/*.css"
+  -Dsonar.exclusions="**/target/**,**/*.js,**/*.ts,**/*.css" \
+  -Dsonar.javascript.file.suffixes=- \
+  -Dsonar.typescript.file.suffixes=-
+
 
 
                         '''
