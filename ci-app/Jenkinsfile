@@ -5,10 +5,9 @@ pipeline {
     }
 
     environment {
-    JAVA_HOME = '/opt/java/jdk-17.0.20.1+1'
-    PATH = "${JAVA_HOME}/bin:${env.PATH}"
+        JAVA_HOME = '/opt/java/jdk-17.0.20.1+1'
+        PATH = "${JAVA_HOME}/bin:${env.PATH}"
     }
-
 
     stages {
 
@@ -19,21 +18,15 @@ pipeline {
             }
         }
 
-        stage('Check Java') {
+        stage('Check Java / Maven') {
             steps {
-                echo '=== Vérification Java / Maven ==='
                 sh '''
                     echo "=== JAVA_HOME ==="
                     echo "$JAVA_HOME"
 
-                    echo "=== which java ==="
+                    echo "=== Java ==="
                     which java
-
-                    echo "=== Java version ==="
                     java -version
-
-                    echo "=== which javac ==="
-                    which javac
 
                     echo "=== Maven ==="
                     which mvn
@@ -45,19 +38,29 @@ pipeline {
         stage('Build') {
             steps {
                 echo '=== Build Maven ==='
-                sh '''
-                    mvn clean package -DskipTests
-                '''
+
+                dir('ci-app') {
+                    sh '''
+                        echo "=== POM ==="
+                        ls -l pom.xml
+
+                        echo "=== Maven Build ==="
+                        mvn clean package -DskipTests
+                    '''
+                }
             }
         }
 
         stage('Tests') {
             steps {
                 echo '=== Tests Maven ==='
-                sh '''
-                    export MOZ_HEADLESS=1
-                    mvn test
-                '''
+
+                dir('ci-app') {
+                    sh '''
+                        export MOZ_HEADLESS=1
+                        mvn test
+                    '''
+                }
             }
         }
 
@@ -65,20 +68,20 @@ pipeline {
             steps {
                 echo '=== Analyse SonarQube ==='
 
-                withSonarQubeEnv('SonarQube') {
-                    sh '''
-                        echo "=== Java utilisé pour SonarQube ==="
-                        echo "JAVA_HOME=$JAVA_HOME"
-                        java -version
+                dir('ci-app') {
+                    withSonarQubeEnv('SonarQube') {
+                        sh '''
+                            echo "=== Java ==="
+                            java -version
 
-                        echo "=== Maven utilisé pour SonarQube ==="
-                        mvn -version
+                            echo "=== Maven ==="
+                            mvn -version
 
-                        echo "=== Analyse SonarQube ==="
-
-                        mvn sonar:sonar \
-                          -Dsonar.exclusions="**/target/**,**/*.js,**/*.ts,**/*.css"
-                    '''
+                            echo "=== SonarQube ==="
+                            mvn sonar:sonar \
+                              -Dsonar.exclusions="**/target/**,**/*.js,**/*.ts,**/*.css"
+                        '''
+                    }
                 }
             }
         }
@@ -96,9 +99,12 @@ pipeline {
         stage('Deploy to Nexus') {
             steps {
                 echo '=== Deploy vers Nexus ==='
-                sh '''
-                    mvn deploy -DskipTests
-                '''
+
+                dir('ci-app') {
+                    sh '''
+                        mvn deploy -DskipTests
+                    '''
+                }
             }
         }
 
@@ -121,21 +127,26 @@ pipeline {
             steps {
                 echo '=== Archivage des artefacts ==='
 
-                archiveArtifacts artifacts: 'target/*.war',
-                                 allowEmptyArchive: true
+                archiveArtifacts(
+                    artifacts: 'ci-app/target/*.war',
+                    allowEmptyArchive: true
+                )
 
-                archiveArtifacts artifacts: 'target/site/jacoco/**/*',
-                                 allowEmptyArchive: true
+                archiveArtifacts(
+                    artifacts: 'ci-app/target/site/jacoco/**/*',
+                    allowEmptyArchive: true
+                )
             }
         }
     }
 
     post {
+
         always {
             echo '=== Pipeline terminé ==='
 
             junit(
-                testResults: 'target/surefire-reports/*.xml',
+                testResults: 'ci-app/target/surefire-reports/*.xml',
                 allowEmptyResults: true
             )
         }
