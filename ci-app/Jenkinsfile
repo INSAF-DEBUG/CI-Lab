@@ -8,10 +8,8 @@ pipeline {
         JAVA_HOME = '/opt/java/jdk-21.0.4+7'
         PATH = "${JAVA_HOME}/bin:${env.PATH}"
 
-        MAVEN_OPTS = '-Xmx1024m'
-
-        // Empêche SonarQube de chercher les fichiers JS/TS/CSS
-        SONAR_USER_HOME = "${WORKSPACE}/.sonar"
+        SONAR_PROJECT_KEY = 'com.insaf.cilab:ci-app'
+        SONAR_PROJECT_NAME = 'ci-app'
     }
 
     stages {
@@ -76,6 +74,12 @@ pipeline {
                     '''
                 }
             }
+            post {
+                always {
+                    junit allowEmptyResults: true,
+                          testResults: 'ci-app/target/surefire-reports/*.xml'
+                }
+            }
         }
 
         stage('SonarQube Analysis') {
@@ -97,11 +101,11 @@ pipeline {
                             echo "=== SonarQube ==="
 
                             mvn sonar:sonar \
-                              -Dsonar.projectKey=com.insaf.cilab:ci-app \
-                              -Dsonar.projectName=ci-app \
-                              -Dsonar.sources=src/main/java,src/main/webapp \
+                              -Dsonar.projectKey="$SONAR_PROJECT_KEY" \
+                              -Dsonar.projectName="$SONAR_PROJECT_NAME" \
+                              -Dsonar.sources=src/main/java \
                               -Dsonar.tests=src/test/java \
-                              -Dsonar.exclusions=**/target/**,**/*.js,**/*.ts,**/*.css \
+                              -Dsonar.exclusions="**/target/**,**/*.js,**/*.ts,**/*.css,**/src/main/webapp/**" \
                               -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
                         '''
                     }
@@ -113,7 +117,7 @@ pipeline {
             steps {
                 echo '=== Quality Gate SonarQube ==='
 
-                timeout(time: 5, unit: 'MINUTES') {
+                timeout(time: 10, unit: 'MINUTES') {
                     waitForQualityGate abortPipeline: true
                 }
             }
@@ -121,18 +125,18 @@ pipeline {
 
         stage('Deploy to Nexus') {
             steps {
-                echo '=== Deploy Nexus ==='
+                echo '=== Deploy vers Nexus ==='
 
                 dir('ci-app') {
                     sh '''
                         set -e
 
-                        if [ -f ./deploy-nexus.sh ]; then
-                            chmod +x ./deploy-nexus.sh
-                            ./deploy-nexus.sh
-                        else
-                            echo "deploy-nexus.sh absent - étape ignorée"
-                        fi
+                        echo "=== Vérification du WAR ==="
+                        ls -lh target/*.war
+
+                        echo "=== Deploy Maven ==="
+
+                        mvn deploy -DskipTests
                     '''
                 }
             }
@@ -142,53 +146,71 @@ pipeline {
             steps {
                 echo '=== JMeter Load Test ==='
 
-                dir('ci-app') {
-                    sh '''
-                        set +e
+                script {
+                    if (fileExists('ci-app/jmeter')) {
 
-                        if command -v jmeter >/dev/null 2>&1; then
-                            echo "JMeter trouvé"
-                            jmeter -n -t test.jmx -l target/jmeter-results.jtl
-                        else
-                            echo "JMeter non installé - étape ignorée"
-                        fi
+                        dir('ci-app') {
+                            sh '''
+                                set -e
 
-                        exit 0
-                    '''
+                                echo "=== Recherche JMeter ==="
+
+                                if command -v jmeter >/dev/null 2>&1; then
+                                    echo "JMeter trouvé :"
+                                    jmeter --version
+
+                                    for file in jmeter/*.jmx; do
+                                        if [ -f "$file" ]; then
+                                            echo "=== Exécution de $file ==="
+
+                                            jmeter \
+                                              -n \
+                                              -t "$file" \
+                                              -l "target/jmeter-results.jtl"
+                                        fi
+                                    done
+                                else
+                                    echo "JMeter non installé."
+                                    echo "Étape ignorée."
+                                fi
+                            '''
+                        }
+
+                    } else {
+                        echo 'Répertoire jmeter absent - étape ignorée.'
+                    }
                 }
             }
         }
 
         stage('Archive') {
             steps {
-                echo '=== Archive artifacts ==='
+                echo '=== Archive des artefacts ==='
 
-                archiveArtifacts artifacts: '''
-                    ci-app/target/*.war,
-                    ci-app/target/site/jacoco/**,
-                    ci-app/target/surefire-reports/**,
-                    ci-app/target/jmeter-results.jtl
-                ''',
-                allowEmptyArchive: true,
-                fingerprint: true
+                archiveArtifacts artifacts: 'ci-app/target/*.war',
+                                 fingerprint: true,
+                                 allowEmptyArchive: false
+
+                archiveArtifacts artifacts: 'ci-app/target/site/jacoco/**',
+                                 fingerprint: true,
+                                 allowEmptyArchive: true
+
+                archiveArtifacts artifacts: 'ci-app/target/surefire-reports/**',
+                                 fingerprint: true,
+                                 allowEmptyArchive: true
+
+                archiveArtifacts artifacts: 'ci-app/target/jmeter-results.jtl',
+                                 fingerprint: true,
+                                 allowEmptyArchive: true
             }
         }
     }
 
     post {
 
-        always {
-            echo '=== Pipeline terminé ==='
-
-            junit(
-                testResults: 'ci-app/target/surefire-reports/*.xml',
-                allowEmptyResults: true
-            )
-        }
-
         success {
             echo '=== CI SUCCESS ==='
-            echo 'Build + Tests + SonarQube + Quality Gate terminés avec succès.'
+            echo 'Le pipeline a terminé avec succès.'
         }
 
         failure {
@@ -196,8 +218,16 @@ pipeline {
             echo 'Le pipeline a échoué.'
         }
 
-        cleanup {
+        always {
+            echo '=== Pipeline terminé ==='
+
             echo '=== Cleanup ==='
+
+            cleanWs(
+                deleteDirs: true,
+                disableDeferredWipeout: true,
+                notFailBuild: true
+            )
         }
     }
 }
