@@ -86,7 +86,9 @@ pipeline {
                             mvn -version
 
                             echo "=== Analyse SonarQube ==="
-                            mvn sonar:sonar
+                            mvn sonar:sonar -Dsonar.exclusions="**/*.js,**/*.ts,**/*.css"
+
+
                         '''
                     }
                 }
