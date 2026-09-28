@@ -10,11 +10,13 @@ public class TaskFunctionalTest extends TestCase {
     private WebDriver driver;
     private TaskPage taskPage;
 
+    @Override
     protected void setUp() {
         driver = new FirefoxDriver();
         taskPage = new TaskPage(driver);
     }
 
+    @Override
     protected void tearDown() {
         if (driver != null) {
             driver.quit();

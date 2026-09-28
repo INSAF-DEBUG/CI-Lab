@@ -3,8 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-    <title>Lab 2 - CI/CD & DevOps</title>
+    <title>Lab 2 - CI/CD DevOps</title>
 
     <style>
         * {
@@ -14,606 +13,336 @@
         body {
             margin: 0;
             font-family: Arial, Helvetica, sans-serif;
-            background: #f1f5f9;
-            color: #1e293b;
+            background: #f4f7fb;
+            color: #1f2937;
         }
 
         header {
-            background: linear-gradient(135deg, #0f172a, #1d4ed8);
+            background: linear-gradient(135deg, #172554, #2563eb);
             color: white;
+            padding: 45px 20px;
             text-align: center;
-            padding: 55px 20px;
         }
 
         header h1 {
-            margin: 0;
-            font-size: 52px;
-        }
-
-        header h2 {
-            margin: 12px 0;
-            font-size: 28px;
-            color: #bfdbfe;
+            margin: 0 0 10px;
+            font-size: 42px;
         }
 
         header p {
+            margin: 0;
             font-size: 18px;
-            color: #dbeafe;
         }
 
         .container {
-            width: 92%;
-            max-width: 1200px;
-            margin: auto;
+            max-width: 1100px;
+            margin: 30px auto;
+            padding: 0 20px;
         }
 
         .section {
-            padding: 55px 0;
-        }
-
-        .section-title {
-            text-align: center;
-            margin-bottom: 40px;
-        }
-
-        .section-title h2 {
-            font-size: 34px;
-            color: #0f172a;
-        }
-
-        .section-title p {
-            color: #64748b;
-            font-size: 17px;
-        }
-
-        /* CI/CD PIPELINE */
-
-        .pipeline {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 12px;
-        }
-
-        .pipeline-step {
-            width: 145px;
-            min-height: 130px;
             background: white;
             border-radius: 14px;
-            padding: 22px 12px;
+            padding: 30px;
+            margin-bottom: 25px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+        }
+
+        .section h2 {
+            color: #1d4ed8;
+            margin-top: 0;
+        }
+
+        .architecture {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 25px;
+        }
+
+        .tool {
+            padding: 20px 10px;
             text-align: center;
-            box-shadow: 0 5px 18px rgba(15, 23, 42, 0.10);
-            border-top: 5px solid #2563eb;
+            background: #eff6ff;
+            border: 2px solid #bfdbfe;
+            border-radius: 10px;
+            font-weight: bold;
         }
 
-        .pipeline-step .icon {
-            font-size: 32px;
-        }
-
-        .pipeline-step h3 {
-            color: #1e3a8a;
-            font-size: 17px;
-        }
-
-        .pipeline-step p {
-            color: #64748b;
-            font-size: 13px;
+        .tool span {
+            display: block;
+            font-size: 28px;
+            margin-bottom: 8px;
         }
 
         .arrow {
-            font-size: 30px;
-            color: #2563eb;
-            font-weight: bold;
-        }
-
-        /* ARCHITECTURE */
-
-        .architecture {
-            margin-top: 45px;
-            background: #0f172a;
-            color: white;
-            border-radius: 18px;
-            padding: 35px;
-        }
-
-        .architecture h3 {
-            text-align: center;
-            font-size: 25px;
-            color: #93c5fd;
-        }
-
-        .architecture-flow {
             display: flex;
-            justify-content: center;
             align-items: center;
-            flex-wrap: wrap;
-            gap: 15px;
-            margin-top: 30px;
-        }
-
-        .architecture-box {
-            background: #1e293b;
-            border: 1px solid #334155;
-            border-radius: 10px;
-            padding: 18px;
-            min-width: 140px;
-            text-align: center;
-        }
-
-        .architecture-box strong {
-            display: block;
-            color: #60a5fa;
-            margin-bottom: 6px;
-        }
-
-        .architecture-box span {
-            color: #cbd5e1;
-            font-size: 13px;
-        }
-
-        .architecture-arrow {
-            color: #60a5fa;
+            justify-content: center;
+            color: #2563eb;
             font-size: 25px;
         }
 
-        /* TESTS */
-
-        .tests-section {
-            background: white;
+        .test-area {
+            max-width: 700px;
+            margin: auto;
         }
 
-        .tests-grid {
+        label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 13px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            font-size: 16px;
+            margin-bottom: 12px;
+        }
+
+        button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 13px 25px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #1d4ed8;
+        }
+
+        #taskList {
+            list-style: none;
+            padding: 0;
+            margin-top: 20px;
+        }
+
+        #taskList li {
+            background: #f1f5f9;
+            border-left: 4px solid #2563eb;
+            padding: 12px 15px;
+            margin-bottom: 8px;
+            border-radius: 5px;
+        }
+
+        .tests {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 22px;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 15px;
         }
 
         .test-card {
+            border: 1px solid #dbeafe;
+            border-radius: 10px;
+            padding: 18px;
             background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 15px;
-            padding: 25px;
-            box-shadow: 0 4px 15px rgba(15, 23, 42, 0.07);
-        }
-
-        .test-card .test-icon {
-            font-size: 35px;
         }
 
         .test-card h3 {
-            color: #1e3a8a;
-        }
-
-        .test-card p {
-            color: #64748b;
-            line-height: 1.6;
-            font-size: 14px;
-        }
-
-        .test-card ul {
-            padding-left: 20px;
-            color: #475569;
-            line-height: 1.8;
-            font-size: 14px;
+            margin-top: 0;
+            color: #1e40af;
         }
 
         .status {
-            display: inline-block;
-            background: #dcfce7;
-            color: #166534;
-            border-radius: 20px;
-            padding: 5px 12px;
-            font-size: 12px;
+            color: #15803d;
             font-weight: bold;
         }
 
-        /* SUMMARY */
-
-        .summary {
-            margin-top: 45px;
-            background: linear-gradient(135deg, #1d4ed8, #2563eb);
-            color: white;
-            border-radius: 18px;
-            padding: 35px;
-            text-align: center;
-        }
-
-        .summary h3 {
-            font-size: 27px;
-        }
-
-        .summary p {
-            color: #dbeafe;
-        }
-
-        .badge {
-            display: inline-block;
-            background: rgba(255, 255, 255, 0.16);
-            border: 1px solid rgba(255, 255, 255, 0.25);
-            border-radius: 20px;
-            padding: 8px 15px;
-            margin: 5px;
-            font-size: 13px;
-        }
-
         footer {
-            background: #0f172a;
-            color: #94a3b8;
             text-align: center;
             padding: 25px;
-        }
-
-        footer strong {
-            color: #60a5fa;
-        }
-
-        @media (max-width: 700px) {
-            header h1 {
-                font-size: 38px;
-            }
-
-            .arrow,
-            .architecture-arrow {
-                display: none;
-            }
-
-            .pipeline-step {
-                width: 100%;
-                max-width: 300px;
-            }
+            background: #172554;
+            color: white;
+            margin-top: 40px;
         }
     </style>
 </head>
 
 <body>
 
-<!-- =====================================================
-     PART 1 : LAB 2 CI/CD & DEVOPS
-     ===================================================== -->
-
 <header>
     <h1>Welcome to Lab 2</h1>
-    <h2>CI/CD & DevOps</h2>
-    <p>
-        Continuous Integration • Continuous Delivery • Automation • Quality
-    </p>
+    <p>CI/CD &amp; DevOps Laboratory</p>
 </header>
 
-<section class="section">
+<div class="container">
 
-    <div class="container">
+    <section class="section">
+        <h2>Lab 2 DevOps Architecture</h2>
 
-        <div class="section-title">
-            <h2>Lab 2 Architecture</h2>
-            <p>
-                From source code to automated quality validation
-            </p>
-        </div>
-
-        <div class="pipeline">
-
-            <div class="pipeline-step">
-                <div class="icon">📦</div>
-                <h3>Git</h3>
-                <p>Source Code Management</p>
-            </div>
-
-            <div class="arrow">→</div>
-
-            <div class="pipeline-step">
-                <div class="icon">🔨</div>
-                <h3>Maven</h3>
-                <p>Build & Dependencies</p>
-            </div>
-
-            <div class="arrow">→</div>
-
-            <div class="pipeline-step">
-                <div class="icon">⚙️</div>
-                <h3>Jenkins</h3>
-                <p>Continuous Integration</p>
-            </div>
-
-            <div class="arrow">→</div>
-
-            <div class="pipeline-step">
-                <div class="icon">🧪</div>
-                <h3>Tests</h3>
-                <p>Automated Testing</p>
-            </div>
-
-            <div class="arrow">→</div>
-
-            <div class="pipeline-step">
-                <div class="icon">📊</div>
-                <h3>JaCoCo</h3>
-                <p>Code Coverage</p>
-            </div>
-
-            <div class="arrow">→</div>
-
-            <div class="pipeline-step">
-                <div class="icon">🔍</div>
-                <h3>SonarQube</h3>
-                <p>Code Quality</p>
-            </div>
-
-            <div class="arrow">→</div>
-
-            <div class="pipeline-step">
-                <div class="icon">🚦</div>
-                <h3>Quality Gate</h3>
-                <p>Pass / Fail</p>
-            </div>
-
-        </div>
+        <p>
+            This laboratory demonstrates a complete CI/CD workflow,
+            from source code management to automated testing,
+            code quality analysis and application deployment.
+        </p>
 
         <div class="architecture">
 
-            <h3>CI/CD Pipeline Architecture</h3>
+            <div class="tool">
+                <span>📦</span>
+                Git
+                <small>Source Control</small>
+            </div>
 
-            <div class="architecture-flow">
+            <div class="arrow">→</div>
 
-                <div class="architecture-box">
-                    <strong>Developer</strong>
-                    <span>Write Code</span>
-                </div>
+            <div class="tool">
+                <span>🔨</span>
+                Maven
+                <small>Build</small>
+            </div>
 
-                <div class="architecture-arrow">→</div>
+            <div class="arrow">→</div>
 
-                <div class="architecture-box">
-                    <strong>Git</strong>
-                    <span>Push / Pull</span>
-                </div>
+            <div class="tool">
+                <span>⚙️</span>
+                Jenkins
+                <small>CI/CD</small>
+            </div>
 
-                <div class="architecture-arrow">→</div>
+            <div class="arrow">→</div>
 
-                <div class="architecture-box">
-                    <strong>Jenkins</strong>
-                    <span>Pipeline</span>
-                </div>
+            <div class="tool">
+                <span>🔍</span>
+                SonarQube
+                <small>Code Quality</small>
+            </div>
 
-                <div class="architecture-arrow">→</div>
+            <div class="arrow">→</div>
 
-                <div class="architecture-box">
-                    <strong>Maven</strong>
-                    <span>Build & Package</span>
-                </div>
+            <div class="tool">
+                <span>🧪</span>
+                Tests
+                <small>JUnit / Selenium</small>
+            </div>
 
-                <div class="architecture-arrow">→</div>
+            <div class="arrow">→</div>
 
-                <div class="architecture-box">
-                    <strong>Testing</strong>
-                    <span>JUnit + Selenium</span>
-                </div>
-
-                <div class="architecture-arrow">→</div>
-
-                <div class="architecture-box">
-                    <strong>JaCoCo</strong>
-                    <span>Coverage</span>
-                </div>
-
-                <div class="architecture-arrow">→</div>
-
-                <div class="architecture-box">
-                    <strong>SonarQube</strong>
-                    <span>Analysis</span>
-                </div>
-
-                <div class="architecture-arrow">→</div>
-
-                <div class="architecture-box">
-                    <strong>Quality Gate</strong>
-                    <span>Pass / Fail</span>
-                </div>
-
+            <div class="tool">
+                <span>🚀</span>
+                Tomcat
+                <small>Deployment</small>
             </div>
 
         </div>
+    </section>
 
-    </div>
+    <section class="section">
+        <h2>Welcome to the Tests</h2>
 
-</section>
+        <p>
+            This section is used by the automated functional tests.
+            You can manually create a task below.
+        </p>
 
+        <div class="test-area">
 
-<!-- =====================================================
-     PART 2 : TESTS
-     ===================================================== -->
+            <label for="title">Titre de la tâche :</label>
 
-<section class="section tests-section">
+            <input
+                type="text"
+                id="title"
+                name="title"
+                placeholder="Entrez le titre de la tâche"
+            >
 
-    <div class="container">
+            <button id="addTask" type="button">
+                Ajouter la tâche
+            </button>
 
-        <div class="section-title">
-            <h2>Welcome to the Tests</h2>
-            <p>
-                Automated testing and software quality validation
-            </p>
+            <h3>Liste des tâches</h3>
+
+            <ul id="taskList"></ul>
+
         </div>
+    </section>
 
-        <div class="tests-grid">
+    <section class="section">
+        <h2>Automated Tests</h2>
+
+        <div class="tests">
 
             <div class="test-card">
-                <div class="test-icon">🧩</div>
-                <h3>Unit Tests</h3>
-
+                <h3>JUnit Unit Tests</h3>
                 <p>
-                    Tests that verify individual classes and methods.
+                    Tests unitaires des classes Java.
                 </p>
-
-                <ul>
-                    <li>TaskTest</li>
-                    <li>AppTest</li>
-                </ul>
-
-                <span class="status">JUnit</span>
+                <p class="status">✓ Automated</p>
             </div>
 
-
             <div class="test-card">
-                <div class="test-icon">🔗</div>
                 <h3>Integration Tests</h3>
-
                 <p>
-                    Tests that verify the interaction between application
-                    components.
+                    Tests d'intégration des services de l'application.
                 </p>
-
-                <ul>
-                    <li>TaskServiceIntegrationTest</li>
-                    <li>Service integration</li>
-                </ul>
-
-                <span class="status">Integration</span>
+                <p class="status">✓ Automated</p>
             </div>
 
-
             <div class="test-card">
-                <div class="test-icon">🌐</div>
                 <h3>Web Tests</h3>
-
                 <p>
-                    Tests that validate the web application and user
-                    interface.
+                    Tests de l'interface Web avec Selenium.
                 </p>
-
-                <ul>
-                    <li>TaskWebTest</li>
-                    <li>Web interface validation</li>
-                </ul>
-
-                <span class="status">Web Testing</span>
+                <p class="status">✓ Automated</p>
             </div>
 
-
             <div class="test-card">
-                <div class="test-icon">⚡</div>
                 <h3>Functional Tests</h3>
-
                 <p>
-                    Tests that validate complete application features
-                    from the user's perspective.
+                    Tests fonctionnels avec Selenium et Page Object Model.
                 </p>
-
-                <ul>
-                    <li>TaskFunctionalTest</li>
-                    <li>Add Task functionality</li>
-                </ul>
-
-                <span class="status">Functional</span>
+                <p class="status">✓ Automated</p>
             </div>
 
-
             <div class="test-card">
-                <div class="test-icon">🦊</div>
-                <h3>Selenium Tests</h3>
-
+                <h3>JaCoCo</h3>
                 <p>
-                    Browser automation using Selenium WebDriver and Firefox.
+                    Mesure de la couverture du code Java.
                 </p>
-
-                <ul>
-                    <li>Firefox WebDriver</li>
-                    <li>Headless execution</li>
-                    <li>Automated UI interaction</li>
-                </ul>
-
-                <span class="status">Selenium</span>
+                <p class="status">✓ Enabled</p>
             </div>
 
-
             <div class="test-card">
-                <div class="test-icon">🏗️</div>
-                <h3>Page Object Model</h3>
-
+                <h3>SonarQube</h3>
                 <p>
-                    Design pattern used to organize Selenium tests.
+                    Analyse de la qualité et de la maintenabilité du code.
                 </p>
-
-                <ul>
-                    <li>TaskPage</li>
-                    <li>Reusable page methods</li>
-                    <li>Separation of test logic</li>
-                </ul>
-
-                <span class="status">POM</span>
-            </div>
-
-
-            <div class="test-card">
-                <div class="test-icon">📈</div>
-                <h3>Code Coverage</h3>
-
-                <p>
-                    JaCoCo measures the percentage of Java code executed
-                    by automated tests.
-                </p>
-
-                <ul>
-                    <li>JaCoCo Agent</li>
-                    <li>Coverage Report</li>
-                    <li>SonarQube integration</li>
-                </ul>
-
-                <span class="status">JaCoCo</span>
-            </div>
-
-
-            <div class="test-card">
-                <div class="test-icon">🛡️</div>
-                <h3>Quality Analysis</h3>
-
-                <p>
-                    SonarQube analyzes the source code and validates
-                    the project against the Quality Gate.
-                </p>
-
-                <ul>
-                    <li>Maintainability</li>
-                    <li>Reliability</li>
-                    <li>Security</li>
-                    <li>Code Smells</li>
-                </ul>
-
-                <span class="status">SonarQube</span>
+                <p class="status">✓ Enabled</p>
             </div>
 
         </div>
+    </section>
 
-
-        <div class="summary">
-
-            <h3>Automated Quality Pipeline</h3>
-
-            <p>
-                Build → Test → Coverage → Analysis → Quality Gate
-            </p>
-
-            <div>
-                <span class="badge">Git</span>
-                <span class="badge">Maven</span>
-                <span class="badge">Jenkins</span>
-                <span class="badge">JUnit</span>
-                <span class="badge">Selenium</span>
-                <span class="badge">JaCoCo</span>
-                <span class="badge">SonarQube</span>
-                <span class="badge">Quality Gate</span>
-            </div>
-
-        </div>
-
-    </div>
-
-</section>
-
+</div>
 
 <footer>
-    <strong>Lab 2 - CI/CD & DevOps</strong>
-    <br>
-    Git • Maven • Jenkins • JUnit • Selenium • JaCoCo • SonarQube
+    CI/CD Lab 2 — Git · Maven · Jenkins · SonarQube · Selenium · Tomcat
 </footer>
+
+<script>
+    document.getElementById("addTask").addEventListener("click", function () {
+
+        const titleInput = document.getElementById("title");
+        const title = titleInput.value.trim();
+
+        if (title === "") {
+            return;
+        }
+
+        const li = document.createElement("li");
+        li.textContent = title;
+
+        document.getElementById("taskList").appendChild(li);
+
+        titleInput.value = "";
+    });
+</script>
 
 </body>
 </html>

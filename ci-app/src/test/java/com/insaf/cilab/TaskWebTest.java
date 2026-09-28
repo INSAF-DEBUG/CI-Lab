@@ -1,4 +1,3 @@
-
 package com.insaf.cilab;
 
 import junit.framework.TestCase;
@@ -10,10 +9,12 @@ public class TaskWebTest extends TestCase {
 
     private WebDriver driver;
 
+    @Override
     protected void setUp() {
         driver = new FirefoxDriver();
     }
 
+    @Override
     protected void tearDown() {
         if (driver != null) {
             driver.quit();
@@ -35,4 +36,3 @@ public class TaskWebTest extends TestCase {
         assertEquals("Test Selenium", task);
     }
 }
-
