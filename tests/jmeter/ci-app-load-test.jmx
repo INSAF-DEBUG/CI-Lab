@@ -35,7 +35,7 @@
         <hashTree>
           <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Response Assertion">
             <collectionProp name="Asserion.test_strings">
-              <stringProp name="1116621687">&lt;button id=&quot;addTask&quot;&gt;Ajouter&lt;/button&gt;</stringProp>
+              <stringProp name="1116621687">id=<stringProp name="1116621687">id=&lt;button id=&quot;addTask&quot;&gt;Ajouter&lt;/button&gt;quot;addTask&lt;button id=&quot;addTask&quot;&gt;Ajouter&lt;/button&gt;quot;lt;button id=&lt;button id=&quot;addTask&quot;&gt;Ajouter&lt;/button&gt;quot;addTask&lt;button id=&quot;addTask&quot;&gt;Ajouter&lt;/button&gt;quot; type=&lt;button id=&quot;addTask&quot;&gt;Ajouter&lt;/button&gt;quot;button&lt;button id=&quot;addTask&quot;&gt;Ajouter&lt;/button&gt;quot;&lt;button id=&quot;addTask&quot;&gt;Ajouter&lt;/button&gt;gt;</stringProp>quot;addTask<stringProp name="1116621687">id=&lt;button id=&quot;addTask&quot;&gt;Ajouter&lt;/button&gt;quot;addTask&lt;button id=&quot;addTask&quot;&gt;Ajouter&lt;/button&gt;quot;lt;button id=&lt;button id=&quot;addTask&quot;&gt;Ajouter&lt;/button&gt;quot;addTask&lt;button id=&quot;addTask&quot;&gt;Ajouter&lt;/button&gt;quot; type=&lt;button id=&quot;addTask&quot;&gt;Ajouter&lt;/button&gt;quot;button&lt;button id=&quot;addTask&quot;&gt;Ajouter&lt;/button&gt;quot;&lt;button id=&quot;addTask&quot;&gt;Ajouter&lt;/button&gt;gt;</stringProp>quot;</stringProp>
             </collectionProp>
             <stringProp name="Assertion.custom_message"></stringProp>
             <stringProp name="Assertion.test_field">Assertion.response_data</stringProp>

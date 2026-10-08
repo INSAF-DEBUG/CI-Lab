@@ -114,13 +114,80 @@ pipeline {
                 echo '=== JMeter Load Test ==='
 
                 sh '''
-                    if [ -x "$JMETER_HOME/bin/jmeter" ]; then
-                        echo "=== JMeter trouvé ==="
-                        "$JMETER_HOME/bin/jmeter" --version
-                    else
-                        echo "JMeter non trouvé dans $JMETER_HOME"
+                    set -e
+
+                    echo "=== Vérification JMeter ==="
+                    "$JMETER_HOME/bin/jmeter" --version
+
+                    echo "=== Vérification du fichier JMX ==="
+
+                    ls -lh "$WORKSPACE/tests/jmeter/ci-app-load-test.jmx"
+
+                    echo "=== Préparation des résultats ==="
+
+                    mkdir -p "$WORKSPACE/jmeter-results"
+
+                    sudo mkdir -p /home/jmeterapp/jmeter-results
+
+                    sudo chown -R jmeterapp:jmeterapp \
+                        /home/jmeterapp/jmeter-results
+
+                    echo "=== Nettoyage anciens résultats ==="
+
+                    sudo rm -f \
+                        /home/jmeterapp/jmeter-results/jenkins-jmeter.jtl
+
+                    sudo rm -f \
+                        /home/jmeterapp/jmeter-results/jenkins-jmeter.log
+
+                    echo "=== Lancement JMeter ==="
+
+                    sudo -u jmeterapp "$JMETER_HOME/bin/jmeter" -n \
+                        -t "$WORKSPACE/tests/jmeter/ci-app-load-test.jmx" \
+                        -l /home/jmeterapp/jmeter-results/jenkins-jmeter.jtl \
+                        -j /home/jmeterapp/jmeter-results/jenkins-jmeter.log
+
+                    echo "=== Copie des résultats vers Jenkins ==="
+
+                    sudo cp \
+                        /home/jmeterapp/jmeter-results/jenkins-jmeter.jtl \
+                        "$WORKSPACE/jmeter-results/"
+
+                    sudo cp \
+                        /home/jmeterapp/jmeter-results/jenkins-jmeter.log \
+                        "$WORKSPACE/jmeter-results/"
+
+                    sudo chown -R "$(id -u):$(id -g)" \
+                        "$WORKSPACE/jmeter-results"
+
+                    echo "=== Résultats JMeter ==="
+
+                    ls -lh "$WORKSPACE/jmeter-results"
+
+                    echo "=== Aperçu du fichier JTL ==="
+
+                    head -5 \
+                        "$WORKSPACE/jmeter-results/jenkins-jmeter.jtl"
+
+                    echo "=== Vérification des erreurs ==="
+
+                    ERRORS=$(grep -c ',false,' \
+                        "$WORKSPACE/jmeter-results/jenkins-jmeter.jtl" || true)
+
+                    echo "Nombre d'erreurs JMeter : $ERRORS"
+
+                    if [ "$ERRORS" -ne 0 ]; then
+
+                        echo "=== JMeter FAILURE ==="
+
+                        cat \
+                            "$WORKSPACE/jmeter-results/jenkins-jmeter.jtl"
+
                         exit 1
                     fi
+
+                    echo "=== JMeter SUCCESS ==="
+                    echo "Toutes les requêtes JMeter sont réussies."
                 '''
             }
         }
@@ -129,7 +196,12 @@ pipeline {
             steps {
                 echo '=== Archive artifacts ==='
 
-                archiveArtifacts artifacts: 'ci-app/target/*.war', fingerprint: true
+                archiveArtifacts artifacts: 'ci-app/target/*.war',
+                                  fingerprint: true
+
+                archiveArtifacts artifacts: 'jmeter-results/*.jtl,jmeter-results/*.log',
+                                  allowEmptyArchive: false,
+                                  fingerprint: true
 
                 junit allowEmptyResults: true,
                       testResults: 'ci-app/target/surefire-reports/*.xml'
@@ -141,7 +213,7 @@ pipeline {
 
         success {
             echo '=== CI SUCCESS ==='
-            echo 'Build, tests, analyse et déploiement terminés.'
+            echo 'Build, tests, analyse, déploiement et JMeter terminés.'
         }
 
         failure {
@@ -154,4 +226,3 @@ pipeline {
         }
     }
 }
-
