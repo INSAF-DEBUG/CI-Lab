@@ -7,7 +7,7 @@ RUN rm -rf /usr/local/tomcat/webapps/* \
        --no-create-home tomcat \
     && chown -R tomcat:tomcat /usr/local/tomcat
 
-COPY --chown=tomcat:tomcat app.war /usr/local/tomcat/webapps/ci-app.war
+COPY --chown=tomcat:tomcat ci-app-1.0-20261002.021714-14.war /usr/local/tomcat/webapps/ci-app.war
 
 EXPOSE 8080
 
