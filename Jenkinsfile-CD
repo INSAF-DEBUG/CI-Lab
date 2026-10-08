@@ -1,0 +1,139 @@
+pipeline {
+
+    agent {
+        label 'docker-trivy'
+    }
+
+    environment {
+        APP_NAME = 'ci-app'
+        IMAGE_NAME = 'ci-app'
+        CONTAINER_NAME = 'ci-app'
+        NEXUS_URL = '192.168.42.128:8081'
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                echo '=== Checkout Git ==='
+                checkout scm
+            }
+        }
+
+        stage('Prepare Docker Context') {
+            steps {
+                echo '=== Préparation du contexte Docker ==='
+
+                dir('ci-app') {
+                    sh '''
+                        set -e
+
+                        echo "=== Contenu du projet ==="
+                        ls -la
+
+                        echo "=== Dockerfile ==="
+                        cat Dockerfile
+
+                        echo "=== Recherche du WAR ==="
+                        find . -name "*.war" -type f
+                    '''
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                echo '=== Build de l'image Docker ==='
+
+                dir('ci-app') {
+                    sh '''
+                        set -e
+
+                        docker build \
+                            -t ${IMAGE_NAME}:latest \
+                            .
+                    '''
+                }
+            }
+        }
+
+        stage('Trivy Scan') {
+            steps {
+                echo '=== Scan de sécurité avec Trivy ==='
+
+                sh '''
+                    set -e
+
+                    trivy image \
+                        --severity HIGH,CRITICAL \
+                        --exit-code 1 \
+                        ${IMAGE_NAME}:latest
+                '''
+            }
+        }
+
+        stage('Stop Old Container') {
+            steps {
+                echo '=== Arrêt de l'ancien conteneur ==='
+
+                sh '''
+                    docker stop ${CONTAINER_NAME} 2>/dev/null || true
+                    docker rm ${CONTAINER_NAME} 2>/dev/null || true
+                '''
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                echo '=== Déploiement du conteneur ==='
+
+                sh '''
+                    set -e
+
+                    docker run -d \
+                        --name ${CONTAINER_NAME} \
+                        -p 8080:8080 \
+                        ${IMAGE_NAME}:latest
+                '''
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                echo '=== Vérification du déploiement ==='
+
+                sh '''
+                    set -e
+
+                    sleep 15
+
+                    echo "=== Conteneur ==="
+                    docker ps
+
+                    echo "=== Logs Tomcat ==="
+                    docker logs ${CONTAINER_NAME} --tail 50
+
+                    echo "=== Test HTTP ==="
+                    curl -f http://localhost:8080/ci-app/ || exit 1
+                '''
+            }
+        }
+    }
+
+    post {
+
+        success {
+            echo '=== CD SUCCESS ==='
+            echo 'Image Docker construite, analysée et déployée avec succès.'
+        }
+
+        failure {
+            echo '=== CD FAILURE ==='
+            echo 'Le déploiement a échoué.'
+        }
+
+        always {
+            echo '=== Pipeline CD terminé ==='
+        }
+    }
+}
