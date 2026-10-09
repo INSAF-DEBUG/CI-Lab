@@ -228,97 +228,119 @@ pipeline {
 
         success {
             echo '=== CI SUCCESS ==='
-
-            emailext(
-                to: "${EMAIL_TO}",
-                subject: "[SUCCESS] ${JOB_NAME} - Build #${BUILD_NUMBER}",
-                mimeType: 'text/html',
-                body: """
-                    <h2 style="color: green;">Pipeline réussi</h2>
-
-                    <p>Bonjour,</p>
-
-                    <p>Le pipeline Jenkins a terminé avec succès.</p>
-
-                    <ul>
-                        <li><b>Projet :</b> ${JOB_NAME}</li>
-                        <li><b>Build :</b> #${BUILD_NUMBER}</li>
-                        <li><b>Statut :</b> SUCCESS</li>
-                    </ul>
-
-                    <p>
-                        <a href="${BUILD_URL}">
-                            Consulter le build Jenkins
-                        </a>
-                    </p>
-
-                    <p>
-                        Les artefacts sont disponibles dans la section
-                        Artifacts du build.
-                    </p>
-                """
-            )
         }
 
         failure {
             echo '=== CI FAILURE ==='
-
-            emailext(
-                to: "${EMAIL_TO}",
-                subject: "[FAILURE] ${JOB_NAME} - Build #${BUILD_NUMBER}",
-                mimeType: 'text/html',
-                body: """
-                    <h2 style="color: red;">Échec du pipeline</h2>
-
-                    <p>Bonjour,</p>
-
-                    <p>Le pipeline Jenkins a échoué.</p>
-
-                    <ul>
-                        <li><b>Projet :</b> ${JOB_NAME}</li>
-                        <li><b>Build :</b> #${BUILD_NUMBER}</li>
-                        <li><b>Statut :</b> FAILURE</li>
-                    </ul>
-
-                    <p>
-                        <a href="${BUILD_URL}console">
-                            Consulter les logs Jenkins
-                        </a>
-                    </p>
-                """
-            )
         }
 
         unstable {
             echo '=== CI UNSTABLE ==='
+        }
 
-            emailext(
-                to: "${EMAIL_TO}",
-                subject: "[UNSTABLE] ${JOB_NAME} - Build #${BUILD_NUMBER}",
-                mimeType: 'text/html',
-                body: """
-                    <h2 style="color: orange;">Pipeline instable</h2>
-
-                    <p>Le build Jenkins est terminé avec le statut UNSTABLE.</p>
-
-                    <ul>
-                        <li><b>Projet :</b> ${JOB_NAME}</li>
-                        <li><b>Build :</b> #${BUILD_NUMBER}</li>
-                        <li><b>Statut :</b> UNSTABLE</li>
-                    </ul>
-
-                    <p>
-                        <a href="${BUILD_URL}">
-                            Consulter le build Jenkins
-                        </a>
-                    </p>
-                """
-            )
+        aborted {
+            echo '=== CI ABORTED ==='
         }
 
         always {
-            echo '=== Pipeline terminé ==='
-            echo '=== Cleanup ==='
+            script {
+                def finalStatus = currentBuild.currentResult ?: 'UNKNOWN'
+                def emailSubject =
+                    "[${finalStatus}] ${env.JOB_NAME} - Build #${env.BUILD_NUMBER}"
+
+                def statusColor = '#666666'
+
+                if (finalStatus == 'SUCCESS') {
+                    statusColor = '#228B22'
+                } else if (finalStatus == 'FAILURE') {
+                    statusColor = '#CC0000'
+                } else if (finalStatus == 'UNSTABLE') {
+                    statusColor = '#E69500'
+                } else if (finalStatus == 'ABORTED') {
+                    statusColor = '#666666'
+                }
+
+                def emailBody = """
+                    <html>
+                    <body style="font-family: Arial, sans-serif;">
+                        <h2 style="color: ${statusColor};">
+                            Notification Jenkins : ${finalStatus}
+                        </h2>
+
+                        <p>Bonjour,</p>
+
+                        <p>
+                            Le pipeline Jenkins est terminé.
+                            Voici le récapitulatif de l'exécution.
+                        </p>
+
+                        <table border="1" cellpadding="8"
+                               cellspacing="0"
+                               style="border-collapse: collapse;">
+                            <tr>
+                                <td><b>Projet</b></td>
+                                <td>${env.JOB_NAME}</td>
+                            </tr>
+                            <tr>
+                                <td><b>Build</b></td>
+                                <td>#${env.BUILD_NUMBER}</td>
+                            </tr>
+                            <tr>
+                                <td><b>Statut</b></td>
+                                <td style="color: ${statusColor};">
+                                    <b>${finalStatus}</b>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td><b>Durée</b></td>
+                                <td>${currentBuild.durationString}</td>
+                            </tr>
+                        </table>
+
+                        <p>
+                            <a href="${env.BUILD_URL}">
+                                Consulter le build Jenkins
+                            </a>
+                        </p>
+
+                        <p>
+                            En cas d'échec, consultez la console du build :
+                            <a href="${env.BUILD_URL}console">
+                                Console Output
+                            </a>
+                        </p>
+
+                        <p>
+                            Cordialement,<br/>
+                            Jenkins CI/CD
+                        </p>
+                    </body>
+                    </html>
+                """
+
+                echo '=== Envoi de la notification par e-mail ==='
+                echo "Destinataire : ${env.EMAIL_TO}"
+                echo "Statut final : ${finalStatus}"
+
+                try {
+                    emailext(
+                        to: env.EMAIL_TO,
+                        subject: emailSubject,
+                        mimeType: 'text/html',
+                        body: emailBody
+                    )
+
+                    echo '=== Étape emailext exécutée ==='
+
+                } catch (Exception e) {
+                    echo "ERREUR : échec de la notification e-mail."
+                    echo "Détail : ${e.getMessage()}"
+                    echo 'Vérifier la configuration Email Extension et les logs Jenkins.'
+                }
+
+                echo '=== Pipeline terminé ==='
+                echo '=== Cleanup ==='
+            }
 
             cleanWs(
                 deleteDirs: true,
