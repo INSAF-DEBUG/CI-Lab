@@ -10,6 +10,8 @@ pipeline {
 
         SONAR_PROJECT_KEY = 'com.insaf.cilab:ci-app'
         SONAR_PROJECT_NAME = 'ci-app'
+
+        EMAIL_TO = 'nemriinsaf000@gmail.com'
     }
 
     stages {
@@ -17,7 +19,6 @@ pipeline {
         stage('Checkout') {
             steps {
                 echo '=== Checkout Git ==='
-
                 checkout scm
             }
         }
@@ -74,10 +75,13 @@ pipeline {
                     '''
                 }
             }
+
             post {
                 always {
-                    junit allowEmptyResults: true,
-                          testResults: 'ci-app/target/surefire-reports/*.xml'
+                    junit(
+                        allowEmptyResults: true,
+                        testResults: 'ci-app/target/surefire-reports/*.xml'
+                    )
                 }
             }
         }
@@ -135,7 +139,6 @@ pipeline {
                         ls -lh target/*.war
 
                         echo "=== Deploy Maven ==="
-
                         mvn deploy -DskipTests
                     '''
                 }
@@ -148,7 +151,6 @@ pipeline {
 
                 script {
                     if (fileExists('ci-app/jmeter')) {
-
                         dir('ci-app') {
                             sh '''
                                 set -e
@@ -156,11 +158,16 @@ pipeline {
                                 echo "=== Recherche JMeter ==="
 
                                 if command -v jmeter >/dev/null 2>&1; then
-                                    echo "JMeter trouvé :"
                                     jmeter --version
+
+                                    mkdir -p target
+
+                                    found=0
 
                                     for file in jmeter/*.jmx; do
                                         if [ -f "$file" ]; then
+                                            found=1
+
                                             echo "=== Exécution de $file ==="
 
                                             jmeter \
@@ -169,13 +176,16 @@ pipeline {
                                               -l "target/jmeter-results.jtl"
                                         fi
                                     done
+
+                                    if [ "$found" -eq 0 ]; then
+                                        echo "Aucun fichier JMX trouvé."
+                                    fi
                                 else
                                     echo "JMeter non installé."
                                     echo "Étape ignorée."
                                 fi
                             '''
                         }
-
                     } else {
                         echo 'Répertoire jmeter absent - étape ignorée.'
                     }
@@ -187,21 +197,29 @@ pipeline {
             steps {
                 echo '=== Archive des artefacts ==='
 
-                archiveArtifacts artifacts: 'ci-app/target/*.war',
-                                 fingerprint: true,
-                                 allowEmptyArchive: false
+                archiveArtifacts(
+                    artifacts: 'ci-app/target/*.war',
+                    fingerprint: true,
+                    allowEmptyArchive: false
+                )
 
-                archiveArtifacts artifacts: 'ci-app/target/site/jacoco/**',
-                                 fingerprint: true,
-                                 allowEmptyArchive: true
+                archiveArtifacts(
+                    artifacts: 'ci-app/target/site/jacoco/**',
+                    fingerprint: true,
+                    allowEmptyArchive: true
+                )
 
-                archiveArtifacts artifacts: 'ci-app/target/surefire-reports/**',
-                                 fingerprint: true,
-                                 allowEmptyArchive: true
+                archiveArtifacts(
+                    artifacts: 'ci-app/target/surefire-reports/**',
+                    fingerprint: true,
+                    allowEmptyArchive: true
+                )
 
-                archiveArtifacts artifacts: 'ci-app/target/jmeter-results.jtl',
-                                 fingerprint: true,
-                                 allowEmptyArchive: true
+                archiveArtifacts(
+                    artifacts: 'ci-app/target/jmeter-results.jtl',
+                    fingerprint: true,
+                    allowEmptyArchive: true
+                )
             }
         }
     }
@@ -210,17 +228,96 @@ pipeline {
 
         success {
             echo '=== CI SUCCESS ==='
-            echo 'Le pipeline a terminé avec succès.'
+
+            emailext(
+                to: "${EMAIL_TO}",
+                subject: "[SUCCESS] ${JOB_NAME} - Build #${BUILD_NUMBER}",
+                mimeType: 'text/html',
+                body: """
+                    <h2 style="color: green;">Pipeline réussi</h2>
+
+                    <p>Bonjour,</p>
+
+                    <p>Le pipeline Jenkins a terminé avec succès.</p>
+
+                    <ul>
+                        <li><b>Projet :</b> ${JOB_NAME}</li>
+                        <li><b>Build :</b> #${BUILD_NUMBER}</li>
+                        <li><b>Statut :</b> SUCCESS</li>
+                    </ul>
+
+                    <p>
+                        <a href="${BUILD_URL}">
+                            Consulter le build Jenkins
+                        </a>
+                    </p>
+
+                    <p>
+                        Les artefacts sont disponibles dans la section
+                        Artifacts du build.
+                    </p>
+                """
+            )
         }
 
         failure {
             echo '=== CI FAILURE ==='
-            echo 'Le pipeline a échoué.'
+
+            emailext(
+                to: "${EMAIL_TO}",
+                subject: "[FAILURE] ${JOB_NAME} - Build #${BUILD_NUMBER}",
+                mimeType: 'text/html',
+                body: """
+                    <h2 style="color: red;">Échec du pipeline</h2>
+
+                    <p>Bonjour,</p>
+
+                    <p>Le pipeline Jenkins a échoué.</p>
+
+                    <ul>
+                        <li><b>Projet :</b> ${JOB_NAME}</li>
+                        <li><b>Build :</b> #${BUILD_NUMBER}</li>
+                        <li><b>Statut :</b> FAILURE</li>
+                    </ul>
+
+                    <p>
+                        <a href="${BUILD_URL}console">
+                            Consulter les logs Jenkins
+                        </a>
+                    </p>
+                """
+            )
+        }
+
+        unstable {
+            echo '=== CI UNSTABLE ==='
+
+            emailext(
+                to: "${EMAIL_TO}",
+                subject: "[UNSTABLE] ${JOB_NAME} - Build #${BUILD_NUMBER}",
+                mimeType: 'text/html',
+                body: """
+                    <h2 style="color: orange;">Pipeline instable</h2>
+
+                    <p>Le build Jenkins est terminé avec le statut UNSTABLE.</p>
+
+                    <ul>
+                        <li><b>Projet :</b> ${JOB_NAME}</li>
+                        <li><b>Build :</b> #${BUILD_NUMBER}</li>
+                        <li><b>Statut :</b> UNSTABLE</li>
+                    </ul>
+
+                    <p>
+                        <a href="${BUILD_URL}">
+                            Consulter le build Jenkins
+                        </a>
+                    </p>
+                """
+            )
         }
 
         always {
             echo '=== Pipeline terminé ==='
-
             echo '=== Cleanup ==='
 
             cleanWs(
@@ -231,4 +328,3 @@ pipeline {
         }
     }
 }
-
