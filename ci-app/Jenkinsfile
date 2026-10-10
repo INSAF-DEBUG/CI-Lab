@@ -4,7 +4,7 @@ options { timestamps() skipDefaultCheckout() }
 
 environment { JAVAHOME = '/opt/java/jdk-21.0.4+7' SONARPROJECTKEY = 'com.insaf.cilab:ci-app' SONARPROJECTNAME = 'ci-app' EMAILTO = 'nemriinsaf000@gmail.com' }
 
-stages { stage('Checkout') { steps { checkout scm echo '=== Checkout Git terminé ===' } }
+stages { stage('Checkout') { steps { checkout scm echo '=== Checkout Git termine ===' } }
 
 stage('Check Java / Maven') { steps { withEnv(["PATH+JAVA={env.JAVA_HOME}/bin"]) { sh ''' set -e echo "=== JAVA_HOME ===" echo "JAVA_HOME" java -version echo "=== Maven ===" mvn -version ''' } } }
 
@@ -12,7 +12,9 @@ stage('Test Email Notification') { steps { echo "Test email vers ${env.EMAIL_TO}
 
 emailext( to: "${env.EMAILTO}", subject: "[TEST PIPELINE] {env.JOB_NAME} - Build #{env.BUILDNUMBER}", mimeType: 'text/plain', body: """Test d'envoi depuis Jenkins.
 
-Projet : {env.JOB_NAME} Build : #{env.BUILDNUMBER} URL : ${env.BUILDURL} """ ) } }
+Projet : {env.JOB_NAME} Build : #{env.BUILDNUMBER} URL : ${env.BUILDURL}
+
+Si vous recevez ce message, emailext fonctionne. """ ) } }
 
 stage('Build') { steps { dir('ci-app') { withEnv(["PATH+JAVA=${env.JAVA_HOME}/bin"]) { sh ''' set -e test -f pom.xml mvn clean package -DskipTests ls -lh target/*.war ''' } } } }
 
@@ -72,9 +74,7 @@ for file in jmeter/*.jmx; do if [ -f "
 𝑒
 𝑡
 /
-(basename "${file%.jmx}")-results.jtl"
-
-echo "Exécution de 
+(basename "${file%.jmx}")-results.jtl" echo "Exécution de 
 𝑓
 𝑖
 𝑙
@@ -117,7 +117,9 @@ if (finalStatus == 'SUCCESS') { statusColor = '#228B22' } else if (finalStatus =
 
 def emailSubject = "[${finalStatus}] {env.JOB_NAME} - Build #{env.BUILD_NUMBER}"
 
-def emailBody = """ <html> <body style="font-family: Arial, sans-serif;"> <h2 style="color: ${statusColor};"> Notification Jenkins : ${finalStatus} </h2> <p>Bonjour,</p> <p>Le pipeline CI/CD Jenkins est terminé.</p>
+def emailBody = """ <html> <body style="font-family: Arial, sans-serif;"> <h2 style="color: ${statusColor};"> Notification Jenkins : ${finalStatus} </h2>
+
+<p>Bonjour,</p> <p>Le pipeline CI/CD Jenkins est terminé.</p>
 
 <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse;"> <tr> <td><b>Projet</b></td> <td>{env.JOB_NAME}</td> </tr> <tr> <td><b>Build</b></td> <td>#{env.BUILD_NUMBER}</td> </tr> <tr> <td><b>Statut</b></td> <td style="color: 
 𝑠
@@ -196,11 +198,13 @@ def emailBody = """ <html> <body style="font-family: Arial, sans-serif;"> <h2 st
 𝑓
 =
 "
-{env.BUILD_URL}console">Consulter la console</a></p> <p>Cordialement,<br/>Jenkins CI/CD</p> </body> </html> """
+{env.BUILD_URL}console">Consulter la console</a></p>
+
+<p>Cordialement,<br/>Jenkins CI/CD</p> </body> </html> """
 
 echo "Notification finale : ${finalStatus}"
 
-try { emailext( to: "${env.EMAIL_TO}", subject: emailSubject, mimeType: 'text/html', body: emailBody ) echo 'Appel de notification finale effectué.' } catch (Exception e) { echo "Erreur de notification : ${e.getMessage()}" currentBuild.description = "Notification email en échec" } }
+try { emailext( to: "${env.EMAIL_TO}", subject: emailSubject, mimeType: 'text/html', body: emailBody ) echo 'Appel de notification finale effectué.' } catch (Exception e) { echo "Erreur de notification : ${e.getMessage()}" currentBuild.description = 'Notification email en échec' } }
 
 echo '=== Pipeline terminé ==='
 
