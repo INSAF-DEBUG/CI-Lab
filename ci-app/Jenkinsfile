@@ -2,67 +2,41 @@ pipeline { agent { label 'centos-build' }
 
 options { timestamps() skipDefaultCheckout() }
 
-environment { JAVAHOME = '/opt/java/jdk-21.0.4+7' PATH = "/opt/java/jdk-21.0.4+7/bin:${env.PATH}" SONARPROJECTKEY = 'com.insaf.cilab:ci-app' SONARPROJECTNAME = 'ci-app' EMAILTO = 'nemriinsaf000@gmail.com' }
+environment { JAVAHOME = '/opt/java/jdk-21.0.4+7' SONARPROJECTKEY = 'com.insaf.cilab:ci-app' SONARPROJECTNAME = 'ci-app' EMAILTO = 'nemriinsaf000@gmail.com' }
 
-stages { stage('Checkout') { steps { echo '=== Checkout Git ===' checkout scm } }
+stages { stage('Checkout') { steps { checkout scm echo '=== Checkout Git terminé ===' } }
 
-stage('Check Java / Maven') { steps { sh ''' set -e echo "=== JAVAHOME ===" echo "$JAVAHOME" echo "=== Java ===" which java java -version echo "=== Maven ===" which mvn mvn -version ''' } }
+stage('Check Java / Maven') { steps { withEnv(["PATH+JAVA={env.JAVA_HOME}/bin"]) { sh ''' set -e echo "=== JAVA_HOME ===" echo "JAVA_HOME" java -version echo "=== Maven ===" mvn -version ''' } } }
 
-stage('Test Email Notification') { steps { echo '=== TEST EMAIL EXTENSION ===' echo "Destinataire : ${env.EMAIL_TO}"
+stage('Test Email Notification') { steps { echo "Test email vers ${env.EMAIL_TO}"
 
-emailext( to: env.EMAILTO, subject: "[TEST PIPELINE] {env.JOB_NAME} - Build #{env.BUILDNUMBER}", mimeType: 'text/plain', body: """ Test d'envoi depuis le pipeline Jenkins.
+emailext( to: "${env.EMAILTO}", subject: "[TEST PIPELINE] {env.JOB_NAME} - Build #{env.BUILDNUMBER}", mimeType: 'text/plain', body: """Test d'envoi depuis Jenkins.
 
-Projet : {env.JOB_NAME} Build : #{env.BUILDNUMBER} Statut actuel : ${currentBuild.currentResult} URL : ${env.BUILDURL}
+Projet : {env.JOB_NAME} Build : #{env.BUILDNUMBER} URL : ${env.BUILDURL} """ ) } }
 
-Si vous recevez ce message, l'envoi depuis emailext fonctionne. """ )
+stage('Build') { steps { dir('ci-app') { withEnv(["PATH+JAVA=${env.JAVA_HOME}/bin"]) { sh ''' set -e test -f pom.xml mvn clean package -DskipTests ls -lh target/*.war ''' } } } }
 
-echo '=== TEST EMAIL TERMINE ===' } }
-
-stage('Build') { steps { echo '=== Build Maven ==='
-
-dir('ci-app') { sh ''' set -e test -f pom.xml
-
-echo "=== Maven Clean Package ===" mvn clean package -DskipTests
-
-echo "=== Vérification du WAR ===" ls -lh target/*.war ''' } } }
-
-stage('Tests') { steps { echo '=== Tests Maven ==='
-
-dir('ci-app') { sh ''' set -e export MOZ_HEADLESS=1 echo "=== Maven Tests ===" mvn test ''' } }
+stage('Tests') { steps { dir('ci-app') { withEnv(["PATH+JAVA=${env.JAVAHOME}/bin", 'MOZHEADLESS=1']) { sh ''' set -e mvn test ''' } } }
 
 post { always { junit( allowEmptyResults: true, testResults: 'ci-app/target/surefire-reports/*.xml' ) } } }
 
-stage('SonarQube Analysis') { steps { echo '=== Analyse SonarQube ==='
-
-dir('ci-app') { withSonarQubeEnv('SonarQube') { sh ''' set -e
-
-echo "=== Java pour SonarQube ===" java -version echo "=== Maven ===" mvn -version
-
-mvn sonar:sonar
+stage('SonarQube Analysis') { steps { dir('ci-app') { withEnv(["PATH+JAVA=${env.JAVAHOME}/bin"]) { withSonarQubeEnv('SonarQube') { sh ''' set -e mvn sonar:sonar
 -Dsonar.projectKey="$SONARPROJECTKEY"
--Dsonar.projectName="$SONARPROJECTNAME"
+-Dsonar.projectName="$SONARPROJECT_NAME"
 -Dsonar.sources=src/main/java
 -Dsonar.tests=src/test/java
 -Dsonar.exclusions="/target/,/.js,/.ts,/.css,/src/main/webapp/*"
--Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml ''' } } } }
+-Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml ''' } } } } }
 
-stage('Quality Gate') { steps { echo '=== Quality Gate SonarQube ==='
+stage('Quality Gate') { steps { timeout(time: 10, unit: 'MINUTES') { waitForQualityGate abortPipeline: true } } }
 
-timeout(time: 10, unit: 'MINUTES') { waitForQualityGate abortPipeline: true } } }
+stage('Deploy to Nexus') { steps { dir('ci-app') { withEnv(["PATH+JAVA=${env.JAVA_HOME}/bin"]) { sh ''' set -e ls -lh target/*.war mvn deploy -DskipTests ''' } } } }
 
-stage('Deploy to Nexus') { steps { echo '=== Déploiement vers Nexus ==='
-
-dir('ci-app') { sh ''' set -e echo "=== Vérification du WAR ===" ls -lh target/*.war
-
-echo "=== Déploiement Maven vers Nexus ===" mvn deploy -DskipTests ''' } } }
-
-stage('JMeter Load Test') { steps { script { echo '=== JMeter Load Test ==='
-
-if (!fileExists('ci-app/jmeter')) { echo 'Répertoire ci-app/jmeter absent : étape ignorée.' } else { dir('ci-app') { sh ''' set -e
+stage('JMeter Load Test') { steps { script { if (!fileExists('ci-app/jmeter')) { echo 'Répertoire ci-app/jmeter absent : étape ignorée.' } else { dir('ci-app') { sh ''' set -e mkdir -p target
 
 if ! command -v jmeter >/dev/null 2>&1; then echo "JMeter non installé : étape ignorée." exit 0 fi
 
-jmeter --version mkdir -p target found=0
+found=0
 
 for file in jmeter/*.jmx; do if [ -f "
 𝑓
@@ -100,18 +74,28 @@ for file in jmeter/*.jmx; do if [ -f "
 /
 (basename "${file%.jmx}")-results.jtl"
 
-echo "=== Exécution de $file ==="
-
-jmeter
--n
--t "$file"
--l "$result" fi done
+echo "Exécution de 
+𝑓
+𝑖
+𝑙
+𝑒
+"
+𝑗
+𝑚
+𝑒
+𝑡
+𝑒
+𝑟
+−
+𝑛
+−
+𝑡
+"
+file" -l "$result" fi done
 
 if [ "$found" -eq 0 ]; then echo "Aucun fichier JMX trouvé." fi ''' } } } } }
 
-stage('Archive') { steps { echo '=== Archivage des artefacts ==='
-
-archiveArtifacts( artifacts: 'ci-app/target/*.war', fingerprint: true, allowEmptyArchive: false )
+stage('Archive') { steps { archiveArtifacts( artifacts: 'ci-app/target/*.war', fingerprint: true, allowEmptyArchive: false )
 
 archiveArtifacts( artifacts: 'ci-app/target/site/jacoco/', fingerprint: true, allowEmptyArchive: true )
 
@@ -133,11 +117,7 @@ if (finalStatus == 'SUCCESS') { statusColor = '#228B22' } else if (finalStatus =
 
 def emailSubject = "[${finalStatus}] {env.JOB_NAME} - Build #{env.BUILD_NUMBER}"
 
-def emailBody = """ <html> <body style="font-family: Arial, sans-serif;"> <h2 style="color: ${statusColor};"> Notification Jenkins : ${finalStatus} </h2>
-
-<p>Bonjour,</p>
-
-<p>Le pipeline CI/CD Jenkins est terminé. Voici le récapitulatif de l'exécution.</p>
+def emailBody = """ <html> <body style="font-family: Arial, sans-serif;"> <h2 style="color: ${statusColor};"> Notification Jenkins : ${finalStatus} </h2> <p>Bonjour,</p> <p>Le pipeline CI/CD Jenkins est terminé.</p>
 
 <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse;"> <tr> <td><b>Projet</b></td> <td>{env.JOB_NAME}</td> </tr> <tr> <td><b>Build</b></td> <td>#{env.BUILD_NUMBER}</td> </tr> <tr> <td><b>Statut</b></td> <td style="color: 
 𝑠
@@ -157,19 +137,70 @@ def emailBody = """ <html> <body style="font-family: Arial, sans-serif;"> <h2 st
 <
 𝑏
 >
-{finalStatus}</b> </td> </tr> <tr> <td><b>Durée</b></td> <td>${currentBuild.durationString}</td> </tr> </table>
+{finalStatus}</b></td> </tr> <tr> <td><b>Durée</b></td> <td>${currentBuild.durationString}</td> </tr> </table>
 
-<p> <a href="${env.BUILD_URL}">Consulter le build Jenkins</a> </p>
+<p><a href="
+𝑒
+𝑛
+𝑣
+.
+𝐵
+𝑈
+𝐼
+𝐿
+𝐷
+𝑈
+𝑅
+𝐿
+"
+>
+𝐶
+𝑜
+𝑛
+𝑠
+𝑢
+𝑙
+𝑡
+𝑒
+𝑟
+𝑙
+𝑒
+𝑏
+𝑢
+𝑖
+𝑙
+𝑑
+𝐽
+𝑒
+𝑛
+𝑘
+𝑖
+𝑛
+𝑠
+<
+/
+𝑎
+>
+<
+/
+𝑝
+>
+<
+𝑝
+>
+<
+𝑎
+ℎ
+𝑟
+𝑒
+𝑓
+=
+"
+{env.BUILD_URL}console">Consulter la console</a></p> <p>Cordialement,<br/>Jenkins CI/CD</p> </body> </html> """
 
-<p> <a href="${env.BUILD_URL}console">Consulter la console</a> </p>
+echo "Notification finale : ${finalStatus}"
 
-<p> Cordialement,<br/> Jenkins CI/CD </p> </body> </html> """
-
-echo '=== NOTIFICATION FINALE ===' echo "Destinataire : ${env.EMAIL_TO}" echo "Statut final : ${finalStatus}"
-
-try { emailext( to: env.EMAIL_TO, subject: emailSubject, mimeType: 'text/html', body: emailBody )
-
-echo '=== APPEL EMAILEXT TERMINE ===' } catch (Exception e) { echo '=== ERREUR ENVOI EMAIL ===' echo "Type : ${e.getClass().getName()}" echo "Message : ${e.getMessage()}" echo 'Échec de la notification finale.' } }
+try { emailext( to: "${env.EMAIL_TO}", subject: emailSubject, mimeType: 'text/html', body: emailBody ) echo 'Appel de notification finale effectué.' } catch (Exception e) { echo "Erreur de notification : ${e.getMessage()}" currentBuild.description = "Notification email en échec" } }
 
 echo '=== Pipeline terminé ==='
 
