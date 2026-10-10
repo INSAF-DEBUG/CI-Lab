@@ -4,21 +4,7 @@ agent { label 'centos-build' }
 
 options { timestamps() skipDefaultCheckout(true) }
 
-environment { JAVAHOME = '/opt/java/jdk-21.0.4+7' PATH = "
-𝐽
-𝐴
-𝑉
-𝐴
-𝐻
-𝑂
-𝑀
-𝐸
-/
-𝑏
-𝑖
-𝑛
-:
-{env.PATH}"
+environment { JAVA_HOME = '/opt/java/jdk-21.0.4+7' PATH = "/opt/java/jdk-21.0.4+7/bin:${env.PATH}"
 
 SONARPROJECTKEY = 'com.insaf.cilab:ci-app' SONARPROJECTNAME = 'ci-app'
 
@@ -26,9 +12,9 @@ EMAIL_TO = 'nemriinsaf000@gmail.com' }
 
 stages {
 
-// ========================================== // 1. CHECKOUT GIT // ========================================== stage('Checkout') { steps { echo '=== Checkout Git ===' checkout scm } }
+stage('Checkout') { steps { echo '=== Checkout Git ===' checkout scm } }
 
-// ========================================== // 2. VERIFICATION JAVA ET MAVEN // ========================================== stage('Check Java / Maven') { steps { echo '=== Vérification Java / Maven ==='
+stage('Check Java / Maven') { steps { echo '=== Vérification Java / Maven ==='
 
 sh ''' set -e
 
@@ -38,7 +24,7 @@ echo "=== Java ===" which java java -version
 
 echo "=== Maven ===" which mvn mvn -version ''' } }
 
-// ========================================== // 3. TEST EMAIL // ========================================== stage('Test Email Notification') { steps { script { echo '=== TEST EMAIL EXTENSION ===' echo "Destinataire : ${env.EMAIL_TO}"
+stage('Test Email Notification') { steps { script { echo '=== TEST EMAIL EXTENSION ===' echo "Destinataire : ${env.EMAIL_TO}"
 
 emailext( to: env.EMAILTO, subject: "[TEST PIPELINE] {env.JOB_NAME} - Build #{env.BUILDNUMBER}", mimeType: 'text/plain', body: """ Test d'envoi depuis le pipeline Jenkins.
 
@@ -48,27 +34,25 @@ Si vous recevez ce message, l'envoi depuis emailext fonctionne. """ )
 
 echo '=== TEST EMAIL TERMINE ===' } } }
 
-// ========================================== // 4. BUILD MAVEN // ========================================== stage('Build') { steps { echo '=== Build Maven ==='
+stage('Build') { steps { echo '=== Build Maven ==='
 
 dir('ci-app') { sh ''' set -e
 
-echo "=== Vérification du POM ===" test -f pom.xml ls -l pom.xml
+test -f pom.xml
 
 echo "=== Maven Clean Package ===" mvn clean package -DskipTests
 
 echo "=== Vérification du WAR ===" ls -lh target/*.war ''' } } }
 
-// ========================================== // 5. TESTS AUTOMATISES // ========================================== stage('Tests') { steps { echo '=== Tests Maven ==='
+stage('Tests') { steps { echo '=== Tests Maven ==='
 
-dir('ci-app') { sh ''' set -e
+dir('ci-app') { sh ''' set -e export MOZ_HEADLESS=1
 
-export MOZ_HEADLESS=1
-
-echo "=== Exécution des tests ===" mvn test ''' } }
+echo "=== Maven Tests ===" mvn test ''' } }
 
 post { always { junit( allowEmptyResults: true, testResults: 'ci-app/target/surefire-reports/*.xml' ) } } }
 
-// ========================================== // 6. ANALYSE SONARQUBE // ========================================== stage('SonarQube Analysis') { steps { echo '=== Analyse SonarQube ==='
+stage('SonarQube Analysis') { steps { echo '=== Analyse SonarQube ==='
 
 dir('ci-app') { withSonarQubeEnv('SonarQube') { sh ''' set -e
 
@@ -86,27 +70,25 @@ mvn sonar:sonar
 -Dsonar.exclusions="/target/,/.js,/.ts,/.css,/src/main/webapp/*"
 -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml ''' } } } }
 
-// ========================================== // 7. QUALITY GATE // ========================================== stage('Quality Gate') { steps { echo '=== Quality Gate SonarQube ==='
+stage('Quality Gate') { steps { echo '=== Quality Gate SonarQube ==='
 
 timeout(time: 10, unit: 'MINUTES') { waitForQualityGate abortPipeline: true } } }
 
-// ========================================== // 8. DEPLOIEMENT NEXUS // ========================================== stage('Deploy to Nexus') { steps { echo '=== Déploiement vers Nexus ==='
+stage('Deploy to Nexus') { steps { echo '=== Déploiement vers Nexus ==='
 
 dir('ci-app') { sh ''' set -e
 
 echo "=== Vérification du WAR ===" ls -lh target/*.war
 
-echo "=== Déploiement Maven ===" mvn deploy -DskipTests ''' } } }
+echo "=== Déploiement Maven vers Nexus ===" mvn deploy -DskipTests ''' } } }
 
-// ========================================== // 9. TEST DE CHARGE JMETER // ========================================== stage('JMeter Load Test') { steps { script { echo '=== JMeter Load Test ==='
+stage('JMeter Load Test') { steps { script { echo '=== JMeter Load Test ==='
 
 if (!fileExists('ci-app/jmeter')) { echo 'Répertoire ci-app/jmeter absent : étape ignorée.' } else { dir('ci-app') { sh ''' set -e
 
 if ! command -v jmeter >/dev/null 2>&1; then echo "JMeter non installé : étape ignorée." exit 0 fi
 
-echo "=== Version JMeter ===" jmeter --version
-
-mkdir -p target
+jmeter --version mkdir -p target
 
 found=0
 
@@ -125,28 +107,26 @@ result="target/
 "
 {file%.jmx}")-results.jtl"
 
-echo "=== Exécution du test : $file ===" echo "Fichier résultat : $result"
+echo "=== Exécution de $file ==="
 
 jmeter
 -n
 -t "$file"
--l "$result"
+-l "$result" fi done
 
-echo "=== Test terminé : $file ===" fi done
+if [ "$found" -eq 0 ]; then echo "Aucun fichier JMX trouvé." fi ''' } } } } }
 
-if [ "$found" -eq 0 ]; then echo "Aucun fichier .jmx trouvé." fi ''' } } } } }
+stage('Archive') { steps { echo '=== Archivage des artefacts ==='
 
-// ========================================== // 10. ARCHIVAGE DES ARTEFACTS // ========================================== stage('Archive') { steps { echo '=== Archivage des artefacts ==='
+archiveArtifacts( artifacts: 'ci-app/target/*.war', fingerprint: true, allowEmptyArchive: false )
 
-// Fichier WAR obligatoire archiveArtifacts( artifacts: 'ci-app/target/*.war', fingerprint: true, allowEmptyArchive: false )
+archiveArtifacts( artifacts: 'ci-app/target/site/jacoco/', fingerprint: true, allowEmptyArchive: true )
 
-// Rapport JaCoCo facultatif archiveArtifacts( artifacts: 'ci-app/target/site/jacoco/', fingerprint: true, allowEmptyArchive: true )
+archiveArtifacts( artifacts: 'ci-app/target/surefire-reports/', fingerprint: true, allowEmptyArchive: true )
 
-// Rapports JUnit facultatifs archiveArtifacts( artifacts: 'ci-app/target/surefire-reports/', fingerprint: true, allowEmptyArchive: true )
+archiveArtifacts( artifacts: 'ci-app/target/*-results.jtl', fingerprint: true, allowEmptyArchive: true ) } } }
 
-// Rapports JMeter facultatifs archiveArtifacts( artifacts: 'ci-app/target/*-results.jtl', fingerprint: true, allowEmptyArchive: true ) } } }
-
-// ========================================== // 11. POST ACTIONS ET NOTIFICATION FINALE // ========================================== post {
+post {
 
 success { echo '=== CI SUCCESS ===' }
 
@@ -172,11 +152,7 @@ def emailBody = """ <html> <body style="font-family: Arial, sans-serif;">
 
 <p> Le pipeline CI/CD Jenkins est terminé. Voici le récapitulatif de l'exécution. </p>
 
-<table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse;"> <tr> <td><b>Projet</b></td> <td>${env.JOB_NAME}</td> </tr>
-
-<tr> <td><b>Build</b></td> <td>#${env.BUILD_NUMBER}</td> </tr>
-
-<tr> <td><b>Statut</b></td> <td style="color: 
+<table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse;"> <tr> <td><b>Projet</b></td> <td>{env.JOB_NAME}</td> </tr> <tr> <td><b>Build</b></td> <td>#{env.BUILD_NUMBER}</td> </tr> <tr> <td><b>Statut</b></td> <td style="color: 
 𝑠
 𝑡
 𝑎
@@ -194,9 +170,7 @@ def emailBody = """ <html> <body style="font-family: Arial, sans-serif;">
 <
 𝑏
 >
-{finalStatus}</b> </td> </tr>
-
-<tr> <td><b>Durée</b></td> <td>${currentBuild.durationString}</td> </tr> </table>
+{finalStatus}</b> </td> </tr> <tr> <td><b>Durée</b></td> <td>${currentBuild.durationString}</td> </tr> </table>
 
 <p> <a href="${env.BUILD_URL}"> Consulter le build Jenkins </a> </p>
 
