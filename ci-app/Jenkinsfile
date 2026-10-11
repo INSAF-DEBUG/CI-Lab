@@ -1,9 +1,9 @@
-
 pipeline {
 
     options {
         skipDefaultCheckout(true)
     }
+
     agent {
         label 'centos-build'
     }
@@ -46,6 +46,11 @@ pipeline {
             }
         }
 
+        /*
+        ==========================================================
+        NOTIFICATION EMAIL DE TEST TEMPORAIREMENT DESACTIVEE
+        ==========================================================
+
         stage('Test Email Notification') {
             steps {
                 script {
@@ -72,6 +77,8 @@ Si vous recevez ce message, l'envoi depuis emailext fonctionne.
                 }
             }
         }
+
+        */
 
         stage('Build') {
             steps {
@@ -178,6 +185,7 @@ Si vous recevez ce message, l'envoi depuis emailext fonctionne.
         stage('Prepare Docker Artifact') {
             steps {
                 echo '=== Préparation de l’artefact pour la VM Docker ==='
+
                 stash(
                     name: 'ci-app-war',
                     includes: 'ci-app/target/ci-app-1.0-SNAPSHOT.war',
@@ -271,7 +279,9 @@ Si vous recevez ce message, l'envoi depuis emailext fonctionne.
 
             steps {
                 echo '=== Construction, scan Trivy et publication Docker Hub ==='
+
                 deleteDir()
+
                 unstash 'ci-app-war'
 
                 sh '''
@@ -302,23 +312,30 @@ EOF
                         BUILD_TAG="$IMAGE:$BUILD_NUMBER"
 
                         echo "=== Construction de l'image : $BUILD_TAG ==="
-                        docker build \\
-                            --pull \\
-                            -t "$BUILD_TAG" \\
+
+                        docker build \
+                            --pull \
+                            -t "$BUILD_TAG" \
                             -t "$IMAGE:latest" .
 
                         echo "=== Analyse Trivy : vulnérabilités HIGH et CRITICAL ==="
-                        trivy image \\
-                            --severity HIGH,CRITICAL \\
-                            --ignore-unfixed \\
-                            --exit-code 1 \\
+
+                        trivy image \
+                            --timeout 15m \
+                            --severity HIGH,CRITICAL \
+                            --ignore-unfixed \
+                            --exit-code 1 \
                             "$BUILD_TAG"
 
                         echo "=== Connexion à Docker Hub ==="
+
                         echo "$DOCKERHUB_TOKEN" |
-                            docker login --username "$DOCKERHUB_USER" --password-stdin
+                            docker login \
+                                --username "$DOCKERHUB_USER" \
+                                --password-stdin
 
                         echo "=== Publication sur Docker Hub ==="
+
                         docker push "$BUILD_TAG"
                         docker push "$IMAGE:latest"
 
@@ -355,6 +372,11 @@ EOF
 
         always {
             script {
+                /*
+                ======================================================
+                NOTIFICATION FINALE PAR EMAIL TEMPORAIREMENT DESACTIVEE
+                ======================================================
+
                 def finalStatus =
                     currentBuild.currentResult ?: 'UNKNOWN'
 
@@ -449,8 +471,13 @@ EOF
                 } catch (Exception e) {
                     echo '=== ERREUR ENVOI EMAIL ==='
                     echo "Détail : ${e.getMessage()}"
+
                     echo 'Vérifier les logs Jenkins et Email Extension.'
                 }
+
+                */
+
+                echo '=== NOTIFICATION EMAIL DESACTIVEE TEMPORAIREMENT ==='
             }
 
             echo '=== Pipeline terminé ==='
