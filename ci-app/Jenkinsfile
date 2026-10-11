@@ -1,5 +1,9 @@
+
 pipeline {
 
+    options {
+        skipDefaultCheckout(true)
+    }
     agent {
         label 'centos-build'
     }
