@@ -1,11 +1,11 @@
 pipeline {
 
-    options {
-        skipDefaultCheckout(true)
-    }
-
     agent {
         label 'centos-build'
+    }
+
+    options {
+        skipDefaultCheckout(true)
     }
 
     environment {
@@ -14,6 +14,13 @@ pipeline {
 
         SONAR_PROJECT_KEY = 'com.insaf.cilab:ci-app'
         SONAR_PROJECT_NAME = 'ci-app'
+
+        NEXUS_URL = 'http://192.168.42.128:8081'
+        NEXUS_REPOSITORY = 'maven-snapshots'
+        NEXUS_GROUP_PATH = 'com/insaf/cilab'
+        NEXUS_ARTIFACT_ID = 'ci-app'
+        NEXUS_VERSION = '1.0-SNAPSHOT'
+        WAR_FILE = 'ci-app-1.0-SNAPSHOT.war'
 
         EMAIL_TO = 'nemriinsaf000@gmail.com'
     }
@@ -47,37 +54,30 @@ pipeline {
         }
 
         /*
-        ==========================================================
-        NOTIFICATION EMAIL DE TEST TEMPORAIREMENT DESACTIVEE
-        ==========================================================
+        ============================================================
+        NOTIFICATION EMAIL DE TEST DESACTIVEE TEMPORAIREMENT
+        A REACTIVER APRES CORRECTION
+        ============================================================
 
         stage('Test Email Notification') {
             steps {
                 script {
-                    echo '=== TEST EMAIL EXTENSION ==='
-                    echo "Destinataire : ${env.EMAIL_TO}"
-
                     emailext(
                         to: env.EMAIL_TO,
                         subject: "[TEST PIPELINE] ${env.JOB_NAME} - Build #${env.BUILD_NUMBER}",
                         mimeType: 'text/plain',
                         body: """
-Test d'envoi depuis le pipeline Jenkins.
+Test d'envoi depuis Jenkins.
 
 Projet : ${env.JOB_NAME}
 Build : #${env.BUILD_NUMBER}
-Statut actuel : ${currentBuild.currentResult}
+Statut : ${currentBuild.currentResult}
 URL : ${env.BUILD_URL}
-
-Si vous recevez ce message, l'envoi depuis emailext fonctionne.
 """
                     )
-
-                    echo '=== ETAPE EMAIL TEST TERMINEE ==='
                 }
             }
         }
-
         */
 
         stage('Build') {
@@ -88,11 +88,13 @@ Si vous recevez ce message, l'envoi depuis emailext fonctionne.
                     sh '''
                         set -e
 
-                        echo "=== POM ==="
-                        ls -l pom.xml
+                        test -f pom.xml
 
-                        echo "=== Maven Build ==="
                         mvn clean package -DskipTests
+
+                        test -f target/ci-app-1.0-SNAPSHOT.war
+
+                        ls -lh target/ci-app-1.0-SNAPSHOT.war
                     '''
                 }
             }
@@ -107,7 +109,6 @@ Si vous recevez ce message, l'envoi depuis emailext fonctionne.
                         set -e
                         export MOZ_HEADLESS=1
 
-                        echo "=== Maven Tests ==="
                         mvn test
                     '''
                 }
@@ -131,15 +132,6 @@ Si vous recevez ce message, l'envoi depuis emailext fonctionne.
                     withSonarQubeEnv('SonarQube') {
                         sh '''
                             set -e
-
-                            echo "=== Java pour SonarQube ==="
-                            echo "JAVA_HOME=$JAVA_HOME"
-                            java -version
-
-                            echo "=== Maven ==="
-                            mvn -version
-
-                            echo "=== SonarQube ==="
 
                             mvn sonar:sonar \
                               -Dsonar.projectKey="$SONAR_PROJECT_KEY" \
@@ -166,31 +158,19 @@ Si vous recevez ce message, l'envoi depuis emailext fonctionne.
 
         stage('Deploy to Nexus') {
             steps {
-                echo '=== Deploy vers Nexus ==='
+                echo '=== Publication du WAR dans Nexus ==='
 
                 dir('ci-app') {
                     sh '''
                         set -e
 
-                        echo "=== Vérification du WAR ==="
-                        ls -lh target/*.war
+                        test -f target/ci-app-1.0-SNAPSHOT.war
 
-                        echo "=== Deploy Maven ==="
                         mvn deploy -DskipTests
+
+                        echo "=== WAR publie dans Nexus ==="
                     '''
                 }
-            }
-        }
-
-        stage('Prepare Docker Artifact') {
-            steps {
-                echo '=== Préparation de l’artefact pour la VM Docker ==='
-
-                stash(
-                    name: 'ci-app-war',
-                    includes: 'ci-app/target/ci-app-1.0-SNAPSHOT.war',
-                    useDefaultExcludes: false
-                )
             }
         }
 
@@ -204,20 +184,17 @@ Si vous recevez ce message, l'envoi depuis emailext fonctionne.
                             sh '''
                                 set -e
 
-                                echo "=== Recherche JMeter ==="
-
                                 if command -v jmeter >/dev/null 2>&1; then
                                     jmeter --version
 
                                     mkdir -p target
-
                                     found=0
 
                                     for file in jmeter/*.jmx; do
                                         if [ -f "$file" ]; then
                                             found=1
 
-                                            echo "=== Exécution de $file ==="
+                                            echo "=== Execution de $file ==="
 
                                             jmeter \
                                               -n \
@@ -227,16 +204,15 @@ Si vous recevez ce message, l'envoi depuis emailext fonctionne.
                                     done
 
                                     if [ "$found" -eq 0 ]; then
-                                        echo "Aucun fichier JMX trouvé."
+                                        echo "Aucun fichier JMX trouve."
                                     fi
                                 else
-                                    echo "JMeter non installé."
-                                    echo "Étape ignorée."
+                                    echo "JMeter non installe : etape ignoree."
                                 fi
                             '''
                         }
                     } else {
-                        echo 'Répertoire jmeter absent - étape ignorée.'
+                        echo 'Repertoire jmeter absent : etape ignoree.'
                     }
                 }
             }
@@ -244,7 +220,7 @@ Si vous recevez ce message, l'envoi depuis emailext fonctionne.
 
         stage('Archive') {
             steps {
-                echo '=== Archive des artefacts ==='
+                echo '=== Archivage des artefacts ==='
 
                 archiveArtifacts(
                     artifacts: 'ci-app/target/*.war',
@@ -273,29 +249,95 @@ Si vous recevez ce message, l'envoi depuis emailext fonctionne.
         }
 
         stage('Docker Build, Trivy Scan and Docker Hub Push') {
+
             agent {
                 label 'docker-trivy'
             }
 
             steps {
-                echo '=== Construction, scan Trivy et publication Docker Hub ==='
+                echo '=== Recuperation Nexus, Docker Build, Trivy et Docker Hub ==='
 
                 deleteDir()
 
-                unstash 'ci-app-war'
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'nexus-credentials',
+                        usernameVariable: 'NEXUS_USER',
+                        passwordVariable: 'NEXUS_PASSWORD'
+                    )
+                ]) {
+
+                    sh '''
+                        set -eu
+
+                        mkdir -p ci-app/target
+
+                        METADATA_URL="${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/${NEXUS_GROUP_PATH}/${NEXUS_ARTIFACT_ID}/${NEXUS_VERSION}/maven-metadata.xml"
+
+                        echo "=== Lecture des metadonnees Nexus ==="
+
+                        curl --fail --silent --show-error \
+                          --user "$NEXUS_USER:$NEXUS_PASSWORD" \
+                          --output /tmp/maven-metadata.xml \
+                          "$METADATA_URL"
+
+                        echo "=== Resolution du dernier snapshot WAR ==="
+
+                        SNAPSHOT_VERSION="$(
+                            python -c '
+import xml.etree.ElementTree as ET
+root = ET.parse("/tmp/maven-metadata.xml").getroot()
+ns = {"m": root.tag.split("}")[0].strip("{")} if "}" in root.tag else {}
+nodes = root.findall(".//m:snapshotVersion", ns) if ns else root.findall(".//snapshotVersion")
+for node in nodes:
+    ext = node.findtext("m:extension", default="", namespaces=ns) if ns else node.findtext("extension", default="")
+    classifier = node.findtext("m:classifier", default="", namespaces=ns) if ns else node.findtext("classifier", default="")
+    value = node.findtext("m:value", default="", namespaces=ns) if ns else node.findtext("value", default="")
+    if ext == "war" and not classifier and value:
+        print(value)
+        break
+'
+                        )"
+
+                        if [ -z "$SNAPSHOT_VERSION" ]; then
+                            echo "ERREUR : aucun snapshot WAR trouve dans Nexus."
+                            exit 1
+                        fi
+
+                        echo "Snapshot trouve : $SNAPSHOT_VERSION"
+
+                        WAR_URL="${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/${NEXUS_GROUP_PATH}/${NEXUS_ARTIFACT_ID}/${NEXUS_VERSION}/${NEXUS_ARTIFACT_ID}-${SNAPSHOT_VERSION}.war"
+
+                        echo "=== Telechargement du WAR depuis Nexus ==="
+
+                        curl --fail --silent --show-error \
+                          --user "$NEXUS_USER:$NEXUS_PASSWORD" \
+                          --output "ci-app/target/$WAR_FILE" \
+                          "$WAR_URL"
+
+                        test -s "ci-app/target/$WAR_FILE"
+
+                        ls -lh "ci-app/target/$WAR_FILE"
+                    '''
+                }
 
                 sh '''
                     set -eu
 
-                    test -f ci-app/target/ci-app-1.0-SNAPSHOT.war
-
                     cat > Dockerfile <<'EOF'
 FROM tomcat:9.0-jdk21-temurin
+
 RUN rm -rf /usr/local/tomcat/webapps/*
+
 COPY ci-app/target/ci-app-1.0-SNAPSHOT.war /usr/local/tomcat/webapps/ci-app.war
+
 EXPOSE 8080
+
 CMD ["catalina.sh", "run"]
 EOF
+
+                    echo "=== Dockerfile genere ==="
+                    cat Dockerfile
                 '''
 
                 withCredentials([
@@ -305,20 +347,22 @@ EOF
                         passwordVariable: 'DOCKERHUB_TOKEN'
                     )
                 ]) {
+
                     sh '''
                         set -eu
 
                         IMAGE="$(printf '%s' "$DOCKERHUB_USER" | tr '[:upper:]' '[:lower:]')/ci-app"
                         BUILD_TAG="$IMAGE:$BUILD_NUMBER"
 
-                        echo "=== Construction de l'image : $BUILD_TAG ==="
+                        echo "=== Construction de $BUILD_TAG ==="
 
                         docker build \
                             --pull \
                             -t "$BUILD_TAG" \
-                            -t "$IMAGE:latest" .
+                            -t "$IMAGE:latest" \
+                            .
 
-                        echo "=== Analyse Trivy : vulnérabilités HIGH et CRITICAL ==="
+                        echo "=== Scan Trivy HIGH / CRITICAL ==="
 
                         trivy image \
                             --timeout 15m \
@@ -327,14 +371,14 @@ EOF
                             --exit-code 1 \
                             "$BUILD_TAG"
 
-                        echo "=== Connexion à Docker Hub ==="
+                        echo "=== Connexion Docker Hub ==="
 
                         echo "$DOCKERHUB_TOKEN" |
                             docker login \
-                                --username "$DOCKERHUB_USER" \
-                                --password-stdin
+                              --username "$DOCKERHUB_USER" \
+                              --password-stdin
 
-                        echo "=== Publication sur Docker Hub ==="
+                        echo "=== Publication Docker Hub ==="
 
                         docker push "$BUILD_TAG"
                         docker push "$IMAGE:latest"
@@ -346,7 +390,7 @@ EOF
 
             post {
                 always {
-                    echo '=== Fin de l’étape Docker / Trivy ==='
+                    echo '=== Fin de l etape Docker / Trivy ==='
                 }
             }
         }
@@ -371,12 +415,14 @@ EOF
         }
 
         always {
-            script {
-                /*
-                ======================================================
-                NOTIFICATION FINALE PAR EMAIL TEMPORAIREMENT DESACTIVEE
-                ======================================================
 
+            /*
+            ============================================================
+            NOTIFICATION FINALE TEMPORAIREMENT DESACTIVEE
+
+            La section emailext sera corrigee et reactivee plus tard.
+
+            script {
                 def finalStatus =
                     currentBuild.currentResult ?: 'UNKNOWN'
 
@@ -398,65 +444,17 @@ EOF
                 def emailBody = """
 <html>
 <body style="font-family: Arial, sans-serif;">
-
     <h2 style="color: ${statusColor};">
         Notification Jenkins : ${finalStatus}
     </h2>
-
-    <p>Bonjour,</p>
-
-    <p>
-        Le pipeline CI/CD Jenkins est terminé.
-        Voici le récapitulatif de l'exécution.
-    </p>
-
-    <table border="1" cellpadding="8" cellspacing="0"
-           style="border-collapse: collapse;">
-        <tr>
-            <td><b>Projet</b></td>
-            <td>${env.JOB_NAME}</td>
-        </tr>
-        <tr>
-            <td><b>Build</b></td>
-            <td>#${env.BUILD_NUMBER}</td>
-        </tr>
-        <tr>
-            <td><b>Statut</b></td>
-            <td style="color: ${statusColor};">
-                <b>${finalStatus}</b>
-            </td>
-        </tr>
-        <tr>
-            <td><b>Durée</b></td>
-            <td>${currentBuild.durationString}</td>
-        </tr>
-    </table>
-
-    <p>
-        <a href="${env.BUILD_URL}">
-            Consulter le build Jenkins
-        </a>
-    </p>
-
-    <p>
-        En cas d'échec, consultez :
-        <a href="${env.BUILD_URL}console">
-            Console Output
-        </a>
-    </p>
-
-    <p>
-        Cordialement,<br/>
-        Jenkins CI/CD
-    </p>
-
+    <p>Projet : ${env.JOB_NAME}</p>
+    <p>Build : #${env.BUILD_NUMBER}</p>
+    <p>Duree : ${currentBuild.durationString}</p>
+    <p><a href="${env.BUILD_URL}">Consulter le build Jenkins</a></p>
+    <p><a href="${env.BUILD_URL}console">Console Output</a></p>
 </body>
 </html>
 """
-
-                echo '=== NOTIFICATION FINALE ==='
-                echo "Destinataire : ${env.EMAIL_TO}"
-                echo "Statut final : ${finalStatus}"
 
                 try {
                     emailext(
@@ -465,22 +463,13 @@ EOF
                         mimeType: 'text/html',
                         body: emailBody
                     )
-
-                    echo '=== APPEL EMAILEXT TERMINE ==='
-
                 } catch (Exception e) {
-                    echo '=== ERREUR ENVOI EMAIL ==='
-                    echo "Détail : ${e.getMessage()}"
-
-                    echo 'Vérifier les logs Jenkins et Email Extension.'
+                    echo "Erreur notification : ${e.getMessage()}"
                 }
-
-                */
-
-                echo '=== NOTIFICATION EMAIL DESACTIVEE TEMPORAIREMENT ==='
             }
+            */
 
-            echo '=== Pipeline terminé ==='
+            echo '=== Pipeline termine ==='
 
             cleanWs(
                 deleteDirs: true,
