@@ -14,8 +14,9 @@ pipeline {
     environment {
         JAVA_HOME = '/opt/java/jdk-17.0.20.1+1'
         MAVEN_OPTS = '-Xmx1024m'
+        MOZ_HEADLESS = '1'
 
-        // Adapter ces chemins aux installations reelles
+        // Adapter aux chemins reels installes sur centos-build
         SONAR_JAVA_HOME = '/opt/java/jdk-21'
         SONAR_MAVEN_HOME = '/opt/maven/apache-maven-3.9.11'
 
@@ -37,7 +38,7 @@ pipeline {
 
         stage('1 - Checkout Git') {
             steps {
-                echo "Recuperation du code source depuis GitHub"
+                echo "Recuperation du code source"
 
                 checkout([
                     $class: 'GitSCM',
@@ -49,19 +50,19 @@ pipeline {
                     set -eu
                     git log -1 --oneline
                     test -f "$APP_DIR/pom.xml"
-                    echo "Code source recupere avec succes."
+                    echo "Code source recupere."
                 '''
             }
         }
 
         stage('2 - Verification Java et Maven') {
             steps {
-                echo "Verification de l'environnement de build"
+                echo "Verification de Java et Maven"
 
                 sh '''
                     set -eu
-
                     test -x "$JAVA_HOME/bin/java"
+
                     export PATH="$JAVA_HOME/bin:$PATH"
 
                     java -version
@@ -74,7 +75,7 @@ pipeline {
 
         stage('3 - Build Maven') {
             steps {
-                echo "Compilation et packaging Maven"
+                echo "Compilation et packaging"
 
                 dir('ci-app') {
                     sh '''
@@ -92,12 +93,19 @@ pipeline {
 
         stage('4 - Tests unitaires et JaCoCo') {
             steps {
-                echo "Execution des tests et generation du rapport JaCoCo"
+                echo "Tests Maven avec Firefox headless"
 
                 dir('ci-app') {
                     sh '''
                         set -eu
                         export PATH="$JAVA_HOME/bin:$PATH"
+                        export MOZ_HEADLESS=1
+
+                        echo "Verification Firefox :"
+                        command -v firefox
+
+                        echo "Verification geckodriver :"
+                        command -v geckodriver
 
                         mvn -B test jacoco:report
 
@@ -120,7 +128,7 @@ pipeline {
 
         stage('5 - Analyse SonarQube') {
             steps {
-                echo "Analyse statique avec SonarQube"
+                echo "Analyse du code avec SonarQube"
 
                 script {
                     if (!fileExists('ci-app/target/site/jacoco/jacoco.xml')) {
@@ -141,10 +149,7 @@ pipeline {
                                 test -x "$SONAR_MAVEN_HOME/bin/mvn"
                                 test -s target/site/jacoco/jacoco.xml
 
-                                echo "Java utilise pour SonarQube :"
                                 "$JAVA_HOME/bin/java" -version
-
-                                echo "Maven utilise pour SonarQube :"
                                 "$SONAR_MAVEN_HOME/bin/mvn" -version
 
                                 "$SONAR_MAVEN_HOME/bin/mvn" -B \
@@ -164,7 +169,7 @@ pipeline {
 
         stage('6 - Quality Gate') {
             steps {
-                echo "Verification du Quality Gate SonarQube"
+                echo "Verification du Quality Gate"
 
                 timeout(time: 10, unit: 'MINUTES') {
                     waitForQualityGate(abortPipeline: true)
@@ -174,7 +179,7 @@ pipeline {
 
         stage('7 - Publication Nexus') {
             steps {
-                echo "Publication de l'artefact Maven sur Nexus"
+                echo "Publication Maven sur Nexus"
 
                 dir('ci-app') {
                     sh '''
@@ -183,7 +188,7 @@ pipeline {
 
                         mvn -B deploy -DskipTests
 
-                        echo "Publication Maven terminee."
+                        echo "Publication terminee."
                     '''
                 }
             }
@@ -197,7 +202,7 @@ pipeline {
             }
 
             steps {
-                echo "Execution des tests de charge JMeter"
+                echo "Execution des tests de charge"
 
                 sh '''
                     set -eu
@@ -242,17 +247,17 @@ pipeline {
             }
 
             steps {
-                echo "Recuperation du WAR depuis Nexus"
+                echo "Preparation de l'agent Docker"
 
                 deleteDir()
 
                 sh '''
                     set -eu
 
-                    command -v curl >/dev/null
-                    command -v python3 >/dev/null
-                    command -v docker >/dev/null
-                    command -v trivy >/dev/null
+                    command -v curl
+                    command -v python3
+                    command -v docker
+                    command -v trivy
 
                     mkdir -p ci-app/target
 
@@ -282,7 +287,7 @@ else:
 PY
                     )"
 
-                    echo "Version trouvee : $SNAPSHOT_VERSION"
+                    echo "Version detectee : $SNAPSHOT_VERSION"
 
                     WAR_URL="$NEXUS_URL/repository/$NEXUS_REPOSITORY/$NEXUS_GROUP_PATH/ci-app-${SNAPSHOT_VERSION}.war"
 
@@ -329,7 +334,7 @@ EOF
                       .
                 '''
 
-                echo "Analyse de securite Trivy"
+                echo "Analyse de securite avec Trivy"
 
                 sh '''
                     set -eu
@@ -341,7 +346,7 @@ EOF
                       "$IMAGE_NAME:$BUILD_NUMBER"
                 '''
 
-                echo "Publication de l'image sur Docker Hub"
+                echo "Publication sur Docker Hub"
 
                 withCredentials([
                     string(
@@ -383,7 +388,7 @@ EOF
         }
 
         failure {
-            echo "Pipeline en echec. Consulter les logs de la console."
+            echo "Pipeline en echec. Consulter la console Jenkins."
         }
 
         always {
