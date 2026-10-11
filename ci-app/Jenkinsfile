@@ -1,28 +1,30 @@
 pipeline {
-
     agent {
         label 'centos-build'
     }
 
     options {
+        timestamps()
+        disableConcurrentBuilds()
         skipDefaultCheckout(true)
     }
 
     environment {
-        JAVA_HOME = '/opt/java/jdk-21.0.4+7'
-        PATH = "${JAVA_HOME}/bin:${env.PATH}"
+        GIT_URL = 'https://github.com/INSAF-DEBUG/CI-Lab.git'
+        APP_DIR = 'ci-app'
+
+        MAVEN_OPTS = '-Xmx1024m'
 
         SONAR_PROJECT_KEY = 'com.insaf.cilab:ci-app'
         SONAR_PROJECT_NAME = 'ci-app'
 
         NEXUS_URL = 'http://192.168.42.128:8081'
         NEXUS_REPOSITORY = 'maven-snapshots'
-        NEXUS_GROUP_PATH = 'com/insaf/cilab'
-        NEXUS_ARTIFACT_ID = 'ci-app'
-        NEXUS_VERSION = '1.0-SNAPSHOT'
-        WAR_FILE = 'ci-app-1.0-SNAPSHOT.war'
+        NEXUS_GROUP_PATH = 'com/insaf/cilab/ci-app/1.0-SNAPSHOT'
+        WAR_NAME = 'ci-app-1.0-SNAPSHOT.war'
 
-        EMAIL_TO = 'nemriinsaf000@gmail.com'
+        DOCKER_IMAGE = 'insafnemri/ci-app'
+        DOCKER_BASE_IMAGE = 'tomcat:9.0-jdk21-temurin-noble'
     }
 
     stages {
@@ -30,14 +32,21 @@ pipeline {
         stage('Checkout') {
             steps {
                 echo '=== Checkout Git ==='
-                checkout scm
+
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: '*/main']],
+                    userRemoteConfigs: [[
+                        url: "${GIT_URL}"
+                    ]]
+                ])
             }
         }
 
         stage('Check Java / Maven') {
             steps {
                 sh '''
-                    set -e
+                    set -eu
 
                     echo "=== JAVA_HOME ==="
                     echo "$JAVA_HOME"
@@ -57,15 +66,15 @@ pipeline {
             steps {
                 echo '=== Build Maven ==='
 
-                dir('ci-app') {
+                dir("${APP_DIR}") {
                     sh '''
-                        set -e
+                        set -eu
 
                         test -f pom.xml
 
                         mvn clean package -DskipTests
 
-                        test -f target/ci-app-1.0-SNAPSHOT.war
+                        test -s target/ci-app-1.0-SNAPSHOT.war
 
                         ls -lh target/ci-app-1.0-SNAPSHOT.war
                     '''
@@ -77,9 +86,10 @@ pipeline {
             steps {
                 echo '=== Tests Maven ==='
 
-                dir('ci-app') {
+                dir("${APP_DIR}") {
                     sh '''
-                        set -e
+                        set -eu
+
                         export MOZ_HEADLESS=1
 
                         mvn test
@@ -90,8 +100,8 @@ pipeline {
             post {
                 always {
                     junit(
-                        allowEmptyResults: true,
-                        testResults: 'ci-app/target/surefire-reports/*.xml'
+                        testResults: 'ci-app/target/surefire-reports/*.xml',
+                        allowEmptyResults: false
                     )
                 }
             }
@@ -101,14 +111,14 @@ pipeline {
             steps {
                 echo '=== Analyse SonarQube ==='
 
-                dir('ci-app') {
+                dir("${APP_DIR}") {
                     withSonarQubeEnv('SonarQube') {
                         sh '''
-                            set -e
+                            set -eu
 
                             mvn sonar:sonar \
-                              -Dsonar.projectKey="$SONAR_PROJECT_KEY" \
-                              -Dsonar.projectName="$SONAR_PROJECT_NAME" \
+                              -Dsonar.projectKey="${SONAR_PROJECT_KEY}" \
+                              -Dsonar.projectName="${SONAR_PROJECT_NAME}" \
                               -Dsonar.sources=src/main/java \
                               -Dsonar.tests=src/test/java \
                               -Dsonar.exclusions="**/target/**,**/*.js,**/*.ts,**/*.css,**/src/main/webapp/**" \
@@ -124,7 +134,9 @@ pipeline {
                 echo '=== Quality Gate SonarQube ==='
 
                 timeout(time: 10, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
+                    waitForQualityGate(
+                        abortPipeline: true
+                    )
                 }
             }
         }
@@ -133,11 +145,11 @@ pipeline {
             steps {
                 echo '=== Publication du WAR dans Nexus ==='
 
-                dir('ci-app') {
+                dir("${APP_DIR}") {
                     sh '''
-                        set -e
+                        set -eu
 
-                        test -f target/ci-app-1.0-SNAPSHOT.war
+                        test -s target/ci-app-1.0-SNAPSHOT.war
 
                         mvn deploy -DskipTests
 
@@ -152,38 +164,30 @@ pipeline {
                 echo '=== JMeter Load Test ==='
 
                 script {
-                    if (fileExists('ci-app/jmeter')) {
-                        dir('ci-app') {
-                            sh '''
-                                set -e
+                    if (fileExists('jmeter')) {
+                        sh '''
+                            set -eu
 
-                                if command -v jmeter >/dev/null 2>&1; then
-                                    jmeter --version
+                            if [ -x ./jmeter/apache-jmeter/bin/jmeter ]; then
+                                JMETER="./jmeter/apache-jmeter/bin/jmeter"
+                            elif command -v jmeter >/dev/null 2>&1; then
+                                JMETER="jmeter"
+                            else
+                                echo "JMeter non installe : etape ignoree."
+                                exit 0
+                            fi
 
-                                    mkdir -p target
-                                    found=0
+                            if [ -f jmeter/test-plan.jmx ]; then
+                                mkdir -p ci-app/target
 
-                                    for file in jmeter/*.jmx; do
-                                        if [ -f "$file" ]; then
-                                            found=1
-
-                                            echo "=== Execution de $file ==="
-
-                                            jmeter \
-                                              -n \
-                                              -t "$file" \
-                                              -l "target/jmeter-results.jtl"
-                                        fi
-                                    done
-
-                                    if [ "$found" -eq 0 ]; then
-                                        echo "Aucun fichier JMX trouve."
-                                    fi
-                                else
-                                    echo "JMeter non installe : etape ignoree."
-                                fi
-                            '''
-                        }
+                                "$JMETER" -n \
+                                  -t jmeter/test-plan.jmx \
+                                  -l ci-app/target/jmeter-results.jtl \
+                                  -j ci-app/target/jmeter.log
+                            else
+                                echo "Plan JMeter absent : etape ignoree."
+                            fi
+                        '''
                     } else {
                         echo 'Repertoire jmeter absent : etape ignoree.'
                     }
@@ -197,32 +201,31 @@ pipeline {
 
                 archiveArtifacts(
                     artifacts: 'ci-app/target/*.war',
-                    fingerprint: true,
-                    allowEmptyArchive: false
+                    allowEmptyArchive: false,
+                    fingerprint: true
                 )
 
                 archiveArtifacts(
                     artifacts: 'ci-app/target/site/jacoco/**',
-                    fingerprint: true,
-                    allowEmptyArchive: true
+                    allowEmptyArchive: true,
+                    fingerprint: true
                 )
 
                 archiveArtifacts(
-                    artifacts: 'ci-app/target/surefire-reports/**',
-                    fingerprint: true,
-                    allowEmptyArchive: true
+                    artifacts: 'ci-app/target/surefire-reports/*.xml',
+                    allowEmptyArchive: true,
+                    fingerprint: true
                 )
 
                 archiveArtifacts(
-                    artifacts: 'ci-app/target/jmeter-results.jtl',
-                    fingerprint: true,
-                    allowEmptyArchive: true
+                    artifacts: 'ci-app/target/jmeter-results.jtl,ci-app/target/jmeter.log',
+                    allowEmptyArchive: true,
+                    fingerprint: true
                 )
             }
         }
 
         stage('Docker Build, Trivy Scan and Docker Hub Push') {
-
             agent {
                 label 'docker-trivy'
             }
@@ -239,13 +242,12 @@ pipeline {
                         passwordVariable: 'NEXUS_PASSWORD'
                     )
                 ]) {
-
                     sh '''
                         set -eu
 
                         mkdir -p ci-app/target
 
-                        METADATA_URL="${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/${NEXUS_GROUP_PATH}/${NEXUS_ARTIFACT_ID}/${NEXUS_VERSION}/maven-metadata.xml"
+                        METADATA_URL="${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/${NEXUS_GROUP_PATH}/maven-metadata.xml"
 
                         echo "=== Lecture des metadonnees Nexus ==="
 
@@ -256,12 +258,15 @@ pipeline {
 
                         echo "=== Resolution du dernier snapshot WAR ==="
 
-                        SNAPSHOT_VERSION="$(
-                            python -c '
+                        SNAPSHOT_VERSION=$(python -c '
 import xml.etree.ElementTree as ET
 
 root = ET.parse("/tmp/maven-metadata.xml").getroot()
-ns = {"m": root.tag.split("}")[0].strip("{")} if "}" in root.tag else {}
+
+ns = (
+    {"m": root.tag.split("}")[0].strip("{")}
+    if "}" in root.tag else {}
+)
 
 nodes = (
     root.findall(".//m:snapshotVersion", ns)
@@ -287,28 +292,27 @@ for node in nodes:
     if ext == "war" and not classifier and value:
         print(value)
         break
-'
-                        )"
+')
 
                         if [ -z "$SNAPSHOT_VERSION" ]; then
-                            echo "ERREUR : aucun snapshot WAR trouve dans Nexus."
+                            echo "ERREUR : aucun WAR snapshot trouve dans Nexus."
                             exit 1
                         fi
 
                         echo "Snapshot trouve : $SNAPSHOT_VERSION"
 
-                        WAR_URL="${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/${NEXUS_GROUP_PATH}/${NEXUS_ARTIFACT_ID}/${NEXUS_VERSION}/${NEXUS_ARTIFACT_ID}-${SNAPSHOT_VERSION}.war"
+                        WAR_URL="${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/${NEXUS_GROUP_PATH}/ci-app-${SNAPSHOT_VERSION}.war"
 
                         echo "=== Telechargement du WAR depuis Nexus ==="
 
                         curl --fail --silent --show-error \
                           --user "$NEXUS_USER:$NEXUS_PASSWORD" \
-                          --output "ci-app/target/$WAR_FILE" \
+                          --output ci-app/target/ci-app-1.0-SNAPSHOT.war \
                           "$WAR_URL"
 
-                        test -s "ci-app/target/$WAR_FILE"
+                        test -s ci-app/target/ci-app-1.0-SNAPSHOT.war
 
-                        ls -lh "ci-app/target/$WAR_FILE"
+                        ls -lh ci-app/target/ci-app-1.0-SNAPSHOT.war
                     '''
                 }
 
@@ -342,47 +346,51 @@ EOF
                 '''
 
                 withCredentials([
-                    usernamePassword(
-                        credentialsId: 'dockerhub-credentials',
-                        usernameVariable: 'DOCKERHUB_USER',
-                        passwordVariable: 'DOCKERHUB_TOKEN'
+                    string(
+                        credentialsId: 'DOCKERHUB_TOKEN',
+                        variable: 'DOCKERHUB_TOKEN'
                     )
                 ]) {
-
                     sh '''
                         set -eu
 
-                        IMAGE="$(printf '%s' "$DOCKERHUB_USER" | tr '[:upper:]' '[:lower:]')/ci-app"
-                        BUILD_TAG="$IMAGE:$BUILD_NUMBER"
+                        IMAGE="insafnemri/ci-app"
+                        BUILD_TAG="${IMAGE}:${BUILD_NUMBER}"
 
-                        echo "=== Construction de $BUILD_TAG ==="
+                        echo "=== Construction de ${BUILD_TAG} ==="
 
-                        docker build \
-                            --pull \
-                            -t "$BUILD_TAG" \
-                            -t "$IMAGE:latest" \
-                            .
+                        docker build --pull \
+                          -t "$BUILD_TAG" \
+                          -t "${IMAGE}:latest" \
+                          .
 
                         echo "=== Scan Trivy HIGH / CRITICAL ==="
 
                         trivy image \
-                            --timeout 15m \
-                            --severity HIGH,CRITICAL \
-                            --ignore-unfixed \
-                            --exit-code 1 \
-                            "$BUILD_TAG"
+                          --timeout 15m \
+                          --severity HIGH,CRITICAL \
+                          --ignore-unfixed \
+                          --exit-code 1 \
+                          "$BUILD_TAG"
+
+                        echo "=== Scan Trivy termine sans findings bloquants ==="
 
                         echo "=== Connexion Docker Hub ==="
 
-                        echo "$DOCKERHUB_TOKEN" |
-                            docker login \
-                              --username "$DOCKERHUB_USER" \
-                              --password-stdin
+                        printf '%s' "$DOCKERHUB_TOKEN" |
+                          docker login \
+                            --username "Insafnemri" \
+                            --password-stdin
 
                         echo "=== Publication Docker Hub ==="
 
                         docker push "$BUILD_TAG"
-                        docker push "$IMAGE:latest"
+
+                        docker push "${IMAGE}:latest"
+
+                        echo "=== Images publiees ==="
+                        echo "$BUILD_TAG"
+                        echo "${IMAGE}:latest"
 
                         docker logout
                     '''
@@ -398,37 +406,16 @@ EOF
     }
 
     post {
-
         success {
-            echo '=== CI SUCCESS ==='
+            echo '=== CI SUCCESS : Pipeline termine avec succes ==='
         }
 
         failure {
-            echo '=== CI FAILURE ==='
-        }
-
-        unstable {
-            echo '=== CI UNSTABLE ==='
-        }
-
-        aborted {
-            echo '=== CI ABORTED ==='
+            echo '=== CI FAILURE : Verifier les logs Jenkins ==='
         }
 
         always {
-
-            /*
-            Notification email desactivee temporairement.
-            A reactiver apres correction.
-            */
-
-            echo '=== Pipeline termine ==='
-
-            cleanWs(
-                deleteDirs: true,
-                disableDeferredWipeout: true,
-                notFailBuild: true
-            )
+            cleanWs()
         }
     }
 }
