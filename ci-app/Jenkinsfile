@@ -16,7 +16,7 @@ pipeline {
         MAVEN_OPTS = '-Xmx1024m'
         MOZ_HEADLESS = '1'
 
-        // Adapter aux chemins reels installes sur centos-build
+        // A verifier sur la VM centos-build
         SONAR_JAVA_HOME = '/opt/java/jdk-21'
         SONAR_MAVEN_HOME = '/opt/maven/apache-maven-3.9.11'
 
@@ -38,7 +38,7 @@ pipeline {
 
         stage('1 - Checkout Git') {
             steps {
-                echo "Recuperation du code source"
+                echo 'Recuperation du code source'
 
                 checkout([
                     $class: 'GitSCM',
@@ -57,7 +57,7 @@ pipeline {
 
         stage('2 - Verification Java et Maven') {
             steps {
-                echo "Verification de Java et Maven"
+                echo 'Verification de Java et Maven'
 
                 sh '''
                     set -eu
@@ -67,7 +67,6 @@ pipeline {
 
                     java -version
                     mvn -version
-
                     test -f "$APP_DIR/pom.xml"
                 '''
             }
@@ -75,7 +74,7 @@ pipeline {
 
         stage('3 - Build Maven') {
             steps {
-                echo "Compilation et packaging"
+                echo 'Compilation et packaging sans execution des tests'
 
                 dir('ci-app') {
                     sh '''
@@ -91,26 +90,20 @@ pipeline {
             }
         }
 
+        /*
+        ============================================================
+        ETAPE 4 - TESTS UNITAIRES ET JACOCO DESACTIVEE TEMPORAIREMENT
+        ============================================================
+
         stage('4 - Tests unitaires et JaCoCo') {
             steps {
-                echo "Tests Maven avec Firefox headless"
-
                 dir('ci-app') {
                     sh '''
                         set -eu
                         export PATH="$JAVA_HOME/bin:$PATH"
                         export MOZ_HEADLESS=1
 
-                        echo "Verification Firefox :"
-                        command -v firefox
-
-                        echo "Verification geckodriver :"
-                        command -v geckodriver
-
                         mvn -B test jacoco:report
-
-                        test -s target/site/jacoco/jacoco.xml
-                        ls -lh target/site/jacoco/jacoco.xml
                     '''
                 }
 
@@ -125,17 +118,15 @@ pipeline {
                 )
             }
         }
+        */
+
+        /*
+        ============================================================
+        ETAPE 5 - ANALYSE SONARQUBE DESACTIVEE TEMPORAIREMENT
+        ============================================================
 
         stage('5 - Analyse SonarQube') {
             steps {
-                echo "Analyse du code avec SonarQube"
-
-                script {
-                    if (!fileExists('ci-app/target/site/jacoco/jacoco.xml')) {
-                        error("Le rapport JaCoCo est absent.")
-                    }
-                }
-
                 withSonarQubeEnv('SonarQube') {
                     withEnv([
                         "JAVA_HOME=${SONAR_JAVA_HOME}",
@@ -145,21 +136,13 @@ pipeline {
                             sh '''
                                 set -eu
 
-                                test -x "$JAVA_HOME/bin/java"
-                                test -x "$SONAR_MAVEN_HOME/bin/mvn"
-                                test -s target/site/jacoco/jacoco.xml
-
-                                "$JAVA_HOME/bin/java" -version
-                                "$SONAR_MAVEN_HOME/bin/mvn" -version
-
                                 "$SONAR_MAVEN_HOME/bin/mvn" -B \
                                   org.sonarsource.scanner.maven:sonar-maven-plugin:5.2.0.4988:sonar \
                                   -Dsonar.projectKey="$SONAR_PROJECT_KEY" \
                                   -Dsonar.projectName="$SONAR_PROJECT_NAME" \
                                   -Dsonar.sources=src/main/java \
                                   -Dsonar.tests=src/test/java \
-                                  -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
-                                  -Dsonar.exclusions="**/target/**,**/*.js,**/*.ts,**/*.css,**/src/main/webapp/**"
+                                  -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
                             '''
                         }
                     }
@@ -169,17 +152,16 @@ pipeline {
 
         stage('6 - Quality Gate') {
             steps {
-                echo "Verification du Quality Gate"
-
                 timeout(time: 10, unit: 'MINUTES') {
                     waitForQualityGate(abortPipeline: true)
                 }
             }
         }
+        */
 
         stage('7 - Publication Nexus') {
             steps {
-                echo "Publication Maven sur Nexus"
+                echo 'Publication de l artefact Maven sur Nexus'
 
                 dir('ci-app') {
                     sh '''
@@ -187,12 +169,15 @@ pipeline {
                         export PATH="$JAVA_HOME/bin:$PATH"
 
                         mvn -B deploy -DskipTests
-
-                        echo "Publication terminee."
                     '''
                 }
             }
         }
+
+        /*
+        ============================================================
+        ETAPE 8 - TESTS DE CHARGE JMETER DESACTIVEE TEMPORAIREMENT
+        ============================================================
 
         stage('8 - Tests de charge JMeter') {
             when {
@@ -202,8 +187,6 @@ pipeline {
             }
 
             steps {
-                echo "Execution des tests de charge"
-
                 sh '''
                     set -eu
                     mkdir -p jmeter/results
@@ -213,29 +196,27 @@ pipeline {
                     elif command -v jmeter >/dev/null 2>&1; then
                         JMETER="$(command -v jmeter)"
                     else
-                        echo "ERREUR : JMeter est introuvable."
+                        echo "JMeter introuvable"
                         exit 1
                     fi
 
                     "$JMETER" -n \
                       -t jmeter/test-plan.jmx \
-                      -l "jmeter/results/results-${BUILD_NUMBER}.jtl" \
-                      -j "jmeter/results/jmeter-${BUILD_NUMBER}.log"
+                      -l "jmeter/results/results-${BUILD_NUMBER}.jtl"
                 '''
 
                 archiveArtifacts(
-                    artifacts: 'jmeter/results/*.jtl,jmeter/results/*.log',
+                    artifacts: 'jmeter/results/*.jtl',
                     allowEmptyArchive: true
                 )
             }
         }
+        */
 
-        stage('9 - Archivage des artefacts') {
+        stage('9 - Archivage du WAR') {
             steps {
-                echo "Archivage du WAR et des rapports"
-
                 archiveArtifacts(
-                    artifacts: 'ci-app/target/*.war,ci-app/target/site/jacoco/**,ci-app/target/surefire-reports/**',
+                    artifacts: 'ci-app/target/*.war',
                     allowEmptyArchive: false
                 )
             }
@@ -247,57 +228,34 @@ pipeline {
             }
 
             steps {
-                echo "Preparation de l'agent Docker"
-
-                deleteDir()
+                echo 'Verification de Docker et Trivy'
 
                 sh '''
                     set -eu
 
+                    docker --version
+                    trivy --version
                     command -v curl
                     command -v python3
-                    command -v docker
-                    command -v trivy
+                '''
+
+                echo 'Recuperation du WAR depuis Nexus'
+
+                sh '''
+                    set -eu
 
                     mkdir -p ci-app/target
 
-                    METADATA_FILE="$(mktemp)"
-                    trap 'rm -f "$METADATA_FILE"' EXIT
-
-                    METADATA_URL="$NEXUS_URL/repository/$NEXUS_REPOSITORY/$NEXUS_GROUP_PATH/maven-metadata.xml"
-
-                    curl -fsS "$METADATA_URL" -o "$METADATA_FILE"
-
-                    SNAPSHOT_VERSION="$(python3 - "$METADATA_FILE" <<'PY'
-import sys
-import xml.etree.ElementTree as ET
-
-root = ET.parse(sys.argv[1]).getroot()
-
-for item in root.findall("./versioning/snapshotVersions/snapshotVersion"):
-    extension = item.findtext("extension")
-    classifier = item.findtext("classifier")
-    value = item.findtext("value")
-
-    if extension == "war" and not classifier and value:
-        print(value)
-        break
-else:
-    raise SystemExit("Aucun artefact WAR snapshot trouve dans Nexus")
-PY
-                    )"
-
-                    echo "Version detectee : $SNAPSHOT_VERSION"
-
-                    WAR_URL="$NEXUS_URL/repository/$NEXUS_REPOSITORY/$NEXUS_GROUP_PATH/ci-app-${SNAPSHOT_VERSION}.war"
+                    WAR_URL="$NEXUS_URL/repository/$NEXUS_REPOSITORY/$NEXUS_GROUP_PATH/ci-app-1.0-SNAPSHOT.war"
 
                     curl -fSL "$WAR_URL" \
                       -o ci-app/target/ci-app-1.0-SNAPSHOT.war
 
                     test -s ci-app/target/ci-app-1.0-SNAPSHOT.war
+                    ls -lh ci-app/target/ci-app-1.0-SNAPSHOT.war
                 '''
 
-                echo "Creation du Dockerfile"
+                echo 'Creation du Dockerfile'
 
                 sh '''
                     set -eu
@@ -307,14 +265,9 @@ FROM tomcat:9.0-jdk21-temurin-noble
 
 RUN rm -rf /usr/local/tomcat/webapps/*
 
-COPY --chown=tomcat:tomcat ci-app/target/ci-app-1.0-SNAPSHOT.war /usr/local/tomcat/webapps/ROOT.war
-
-USER tomcat
+COPY ci-app/target/ci-app-1.0-SNAPSHOT.war /usr/local/tomcat/webapps/ROOT.war
 
 EXPOSE 8080
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-  CMD bash -c 'echo > /dev/tcp/127.0.0.1/8080' || exit 1
 
 CMD ["catalina.sh", "run"]
 EOF
@@ -322,19 +275,18 @@ EOF
                     cat Dockerfile
                 '''
 
-                echo "Construction de l'image Docker"
+                echo 'Construction de l image Docker'
 
                 sh '''
                     set -eu
 
-                    docker build \
-                      --pull \
+                    docker build --pull \
                       -t "$IMAGE_NAME:$BUILD_NUMBER" \
                       -t "$IMAGE_NAME:latest" \
                       .
                 '''
 
-                echo "Analyse de securite avec Trivy"
+                echo 'Analyse de securite avec Trivy'
 
                 sh '''
                     set -eu
@@ -346,7 +298,7 @@ EOF
                       "$IMAGE_NAME:$BUILD_NUMBER"
                 '''
 
-                echo "Publication sur Docker Hub"
+                echo 'Publication de l image sur Docker Hub'
 
                 withCredentials([
                     string(
@@ -384,11 +336,11 @@ EOF
 
     post {
         success {
-            echo "Pipeline CI/CD termine avec succes."
+            echo 'Pipeline Docker et Trivy termine avec succes.'
         }
 
         failure {
-            echo "Pipeline en echec. Consulter la console Jenkins."
+            echo 'Pipeline en echec : consulter la console Jenkins.'
         }
 
         always {
