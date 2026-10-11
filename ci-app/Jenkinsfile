@@ -12,40 +12,32 @@ pipeline {
     }
 
     environment {
-        // Java 17 : compilation et tests
         JAVA_HOME = '/opt/java/jdk-17.0.20.1+1'
         MAVEN_OPTS = '-Xmx1024m'
 
-        // A VERIFIER sur l'agent avant le build
+        // Adapter ces chemins aux installations reelles
         SONAR_JAVA_HOME = '/opt/java/jdk-21'
         SONAR_MAVEN_HOME = '/opt/maven/apache-maven-3.9.11'
 
-        // Git
         GIT_URL = 'https://github.com/INSAF-DEBUG/CI-Lab.git'
         APP_DIR = 'ci-app'
 
-        // SonarQube
         SONAR_PROJECT_KEY = 'com.insaf.cilab:ci-app'
         SONAR_PROJECT_NAME = 'ci-app'
 
-        // Nexus
         NEXUS_URL = 'http://192.168.42.128:8081'
         NEXUS_REPOSITORY = 'maven-snapshots'
         NEXUS_GROUP_PATH = 'com/insaf/cilab/ci-app/1.0-SNAPSHOT'
 
-        // Docker Hub
         IMAGE_NAME = 'insafnemri/ci-app'
         DOCKERHUB_USER = 'insafnemri'
-
-        // Image de base
-        TOMCAT_IMAGE = 'tomcat:9.0-jdk21-temurin-noble'
     }
 
     stages {
 
         stage('1 - Checkout Git') {
             steps {
-                echo '=== Recuperation du code source ==='
+                echo "Recuperation du code source depuis GitHub"
 
                 checkout([
                     $class: 'GitSCM',
@@ -55,33 +47,26 @@ pipeline {
 
                 sh '''
                     set -eu
-                    echo "Commit recupere :"
                     git log -1 --oneline
-                    echo "Contenu du workspace :"
-                    ls -la
                     test -f "$APP_DIR/pom.xml"
+                    echo "Code source recupere avec succes."
                 '''
             }
         }
 
         stage('2 - Verification Java et Maven') {
             steps {
-                echo '=== Verification de l'environnement de build ==='
+                echo "Verification de l'environnement de build"
 
                 sh '''
                     set -eu
 
                     test -x "$JAVA_HOME/bin/java"
-
                     export PATH="$JAVA_HOME/bin:$PATH"
 
-                    echo "Version Java :"
                     java -version
-
-                    echo "Version Maven :"
                     mvn -version
 
-                    echo "Verification du projet Maven :"
                     test -f "$APP_DIR/pom.xml"
                 '''
             }
@@ -89,17 +74,15 @@ pipeline {
 
         stage('3 - Build Maven') {
             steps {
-                echo '=== Compilation et packaging ==='
+                echo "Compilation et packaging Maven"
 
                 dir('ci-app') {
                     sh '''
                         set -eu
-
                         export PATH="$JAVA_HOME/bin:$PATH"
 
                         mvn -B clean package -DskipTests
 
-                        echo "Verification du fichier WAR :"
                         test -s target/ci-app-1.0-SNAPSHOT.war
                         ls -lh target/ci-app-1.0-SNAPSHOT.war
                     '''
@@ -107,22 +90,17 @@ pipeline {
             }
         }
 
-        stage('4 - Tests unitaires et couverture') {
+        stage('4 - Tests unitaires et JaCoCo') {
             steps {
-                echo '=== Execution des tests et generation JaCoCo ==='
+                echo "Execution des tests et generation du rapport JaCoCo"
 
                 dir('ci-app') {
                     sh '''
                         set -eu
-
                         export PATH="$JAVA_HOME/bin:$PATH"
 
                         mvn -B test jacoco:report
 
-                        echo "Verification des rapports de tests :"
-                        ls -la target/surefire-reports/
-
-                        echo "Verification du rapport JaCoCo :"
                         test -s target/site/jacoco/jacoco.xml
                         ls -lh target/site/jacoco/jacoco.xml
                     '''
@@ -142,11 +120,11 @@ pipeline {
 
         stage('5 - Analyse SonarQube') {
             steps {
-                echo '=== Analyse statique avec SonarQube ==='
+                echo "Analyse statique avec SonarQube"
 
                 script {
-                    if (!fileExists("${APP_DIR}/target/site/jacoco/jacoco.xml")) {
-                        error('Rapport JaCoCo introuvable : analyse SonarQube annulee.')
+                    if (!fileExists('ci-app/target/site/jacoco/jacoco.xml')) {
+                        error("Le rapport JaCoCo est absent.")
                     }
                 }
 
@@ -159,15 +137,15 @@ pipeline {
                             sh '''
                                 set -eu
 
-                                echo "Java utilise pour SonarQube :"
                                 test -x "$JAVA_HOME/bin/java"
-                                java -version
+                                test -x "$SONAR_MAVEN_HOME/bin/mvn"
+                                test -s target/site/jacoco/jacoco.xml
+
+                                echo "Java utilise pour SonarQube :"
+                                "$JAVA_HOME/bin/java" -version
 
                                 echo "Maven utilise pour SonarQube :"
-                                test -x "$SONAR_MAVEN_HOME/bin/mvn"
                                 "$SONAR_MAVEN_HOME/bin/mvn" -version
-
-                                test -s target/site/jacoco/jacoco.xml
 
                                 "$SONAR_MAVEN_HOME/bin/mvn" -B \
                                   org.sonarsource.scanner.maven:sonar-maven-plugin:5.2.0.4988:sonar \
@@ -175,8 +153,8 @@ pipeline {
                                   -Dsonar.projectName="$SONAR_PROJECT_NAME" \
                                   -Dsonar.sources=src/main/java \
                                   -Dsonar.tests=src/test/java \
-                                  -Dsonar.exclusions="**/target/**,**/*.js,**/*.ts,**/*.css,**/src/main/webapp/**" \
-                                  -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
+                                  -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
+                                  -Dsonar.exclusions="**/target/**,**/*.js,**/*.ts,**/*.css,**/src/main/webapp/**"
                             '''
                         }
                     }
@@ -186,7 +164,7 @@ pipeline {
 
         stage('6 - Quality Gate') {
             steps {
-                echo '=== Attente du Quality Gate ==='
+                echo "Verification du Quality Gate SonarQube"
 
                 timeout(time: 10, unit: 'MINUTES') {
                     waitForQualityGate(abortPipeline: true)
@@ -194,14 +172,13 @@ pipeline {
             }
         }
 
-        stage('7 - Publication sur Nexus') {
+        stage('7 - Publication Nexus') {
             steps {
-                echo '=== Publication de l artefact Maven ==='
+                echo "Publication de l'artefact Maven sur Nexus"
 
                 dir('ci-app') {
                     sh '''
                         set -eu
-
                         export PATH="$JAVA_HOME/bin:$PATH"
 
                         mvn -B deploy -DskipTests
@@ -220,11 +197,10 @@ pipeline {
             }
 
             steps {
-                echo '=== Execution des tests de charge ==='
+                echo "Execution des tests de charge JMeter"
 
                 sh '''
                     set -eu
-
                     mkdir -p jmeter/results
 
                     if [ -x jmeter/apache-jmeter/bin/jmeter ]; then
@@ -249,9 +225,9 @@ pipeline {
             }
         }
 
-        stage('9 - Archivage du WAR') {
+        stage('9 - Archivage des artefacts') {
             steps {
-                echo '=== Archivage des artefacts ==='
+                echo "Archivage du WAR et des rapports"
 
                 archiveArtifacts(
                     artifacts: 'ci-app/target/*.war,ci-app/target/site/jacoco/**,ci-app/target/surefire-reports/**',
@@ -260,33 +236,30 @@ pipeline {
             }
         }
 
-        stage('10 - Docker : construction et publication') {
+        stage('10 - Docker et Trivy') {
             agent {
                 label 'docker-trivy'
             }
 
             steps {
-                echo '=== Preparation de l artefact depuis Nexus ==='
+                echo "Recuperation du WAR depuis Nexus"
 
                 deleteDir()
 
                 sh '''
                     set -eu
 
-                    command -v curl >/dev/null 2>&1
-                    command -v python3 >/dev/null 2>&1
-                    command -v docker >/dev/null 2>&1
-                    command -v trivy >/dev/null 2>&1
+                    command -v curl >/dev/null
+                    command -v python3 >/dev/null
+                    command -v docker >/dev/null
+                    command -v trivy >/dev/null
 
                     mkdir -p ci-app/target
 
                     METADATA_FILE="$(mktemp)"
-
                     trap 'rm -f "$METADATA_FILE"' EXIT
 
                     METADATA_URL="$NEXUS_URL/repository/$NEXUS_REPOSITORY/$NEXUS_GROUP_PATH/maven-metadata.xml"
-
-                    echo "Lecture des metadonnees Nexus : $METADATA_URL"
 
                     curl -fsS "$METADATA_URL" -o "$METADATA_FILE"
 
@@ -305,11 +278,11 @@ for item in root.findall("./versioning/snapshotVersions/snapshotVersion"):
         print(value)
         break
 else:
-    raise SystemExit("Aucune version snapshot WAR trouvee dans Nexus")
+    raise SystemExit("Aucun artefact WAR snapshot trouve dans Nexus")
 PY
                     )"
 
-                    echo "Version snapshot detectee : $SNAPSHOT_VERSION"
+                    echo "Version trouvee : $SNAPSHOT_VERSION"
 
                     WAR_URL="$NEXUS_URL/repository/$NEXUS_REPOSITORY/$NEXUS_GROUP_PATH/ci-app-${SNAPSHOT_VERSION}.war"
 
@@ -317,11 +290,9 @@ PY
                       -o ci-app/target/ci-app-1.0-SNAPSHOT.war
 
                     test -s ci-app/target/ci-app-1.0-SNAPSHOT.war
-
-                    ls -lh ci-app/target/ci-app-1.0-SNAPSHOT.war
                 '''
 
-                echo '=== Creation du Dockerfile ==='
+                echo "Creation du Dockerfile"
 
                 sh '''
                     set -eu
@@ -343,11 +314,10 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
 CMD ["catalina.sh", "run"]
 EOF
 
-                    echo "Dockerfile genere :"
                     cat Dockerfile
                 '''
 
-                echo '=== Construction de l image Docker ==='
+                echo "Construction de l'image Docker"
 
                 sh '''
                     set -eu
@@ -359,7 +329,7 @@ EOF
                       .
                 '''
 
-                echo '=== Analyse de securite avec Trivy ==='
+                echo "Analyse de securite Trivy"
 
                 sh '''
                     set -eu
@@ -371,7 +341,7 @@ EOF
                       "$IMAGE_NAME:$BUILD_NUMBER"
                 '''
 
-                echo '=== Publication sur Docker Hub ==='
+                echo "Publication de l'image sur Docker Hub"
 
                 withCredentials([
                     string(
@@ -382,10 +352,9 @@ EOF
                     sh '''
                         set -eu
 
-                        echo "$DOCKERHUB_TOKEN" | \
-                          docker login \
-                            --username "$DOCKERHUB_USER" \
-                            --password-stdin
+                        echo "$DOCKERHUB_TOKEN" | docker login \
+                          --username "$DOCKERHUB_USER" \
+                          --password-stdin
 
                         docker push "$IMAGE_NAME:$BUILD_NUMBER"
                         docker push "$IMAGE_NAME:latest"
@@ -414,11 +383,11 @@ EOF
         }
 
         failure {
-            echo "Pipeline en echec. Consulter les logs de l etape en erreur."
+            echo "Pipeline en echec. Consulter les logs de la console."
         }
 
         always {
-            echo "Fin du build #${BUILD_NUMBER}."
+            echo "Fin du build numero ${BUILD_NUMBER}."
             cleanWs()
         }
     }
