@@ -298,7 +298,7 @@ EOF
                     sh '''
                         set -eu
 
-                        IMAGE="$DOCKERHUB_USER/ci-app"
+                        IMAGE="$(printf '%s' "$DOCKERHUB_USER" | tr '[:upper:]' '[:lower:]')/ci-app"
                         BUILD_TAG="$IMAGE:$BUILD_NUMBER"
 
                         echo "=== Construction de l'image : $BUILD_TAG ==="
