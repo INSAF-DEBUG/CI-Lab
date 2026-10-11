@@ -15,13 +15,13 @@ pipeline {
         booleanParam(
             name: 'ENABLE_SONAR',
             defaultValue: false,
-            description: 'Activer analyse SonarQube et Quality Gate'
+            description: 'Activer SonarQube et le Quality Gate'
         )
 
         booleanParam(
             name: 'ENABLE_JMETER',
             defaultValue: false,
-            description: 'Executer les tests de charge JMeter'
+            description: 'Activer les tests de charge JMeter'
         )
     }
 
@@ -46,11 +46,13 @@ pipeline {
                 checkout scm
 
                 sh '''
+                    set -e
                     echo "=== Depot Git ==="
                     git log -1 --oneline
-                    echo "=== Fichiers du projet ==="
-                    ls -la
+
+                    echo "=== Application ==="
                     ls -la ci-app
+                    test -f ci-app/pom.xml
                 '''
             }
         }
@@ -66,7 +68,7 @@ pipeline {
                     echo "=== Maven ==="
                     mvn -version
 
-                    echo "=== Docker disponible sur agent de build ==="
+                    echo "=== Outils ==="
                     command -v git
                     command -v mvn
                 '''
@@ -95,16 +97,14 @@ pipeline {
                 dir('ci-app') {
                     sh '''
                         set -e
-
-                        # Active la collecte de couverture.
-                        # MOZ_HEADLESS permet a Firefox de fonctionner
-                        # sans interface graphique si Selenium est utilise.
                         export MOZ_HEADLESS=1
 
                         mvn -B \
                           org.jacoco:jacoco-maven-plugin:0.8.12:prepare-agent \
                           test \
                           org.jacoco:jacoco-maven-plugin:0.8.12:report
+
+                        test -f target/site/jacoco/index.html
                     '''
                 }
             }
@@ -113,7 +113,7 @@ pipeline {
                 always {
                     junit(
                         testResults: 'ci-app/target/surefire-reports/*.xml',
-                        allowEmptyResults: true
+                        allowEmptyResults: false
                     )
 
                     archiveArtifacts(
@@ -167,15 +167,14 @@ pipeline {
                     sh '''
                         set -e
 
-                        echo "=== Verification de la connexion Nexus ==="
+                        echo "=== Verification de Nexus ==="
 
                         curl -fsS \
-                          --connect-timeout 5 \
+                          --connect-timeout 10 \
                           "$NEXUS_URL/" \
                           -o /dev/null
 
-                        echo "=== Publication de l'artefact ==="
-
+                        echo "=== Publication Maven ==="
                         mvn -B deploy -DskipTests
                     '''
                 }
@@ -193,14 +192,11 @@ pipeline {
                 sh '''
                     set -e
 
-                    if ! command -v jmeter >/dev/null 2>&1; then
-                        echo "ERREUR : JMeter n'est pas installe sur cet agent."
-                        exit 1
-                    fi
+                    command -v jmeter
 
                     if [ ! -f tests/jmeter/ci-app.jmx ]; then
-                        echo "ERREUR : fichier tests/jmeter/ci-app.jmx introuvable."
-                        echo "Adapte le chemin au fichier JMX de ton projet."
+                        echo "ERREUR : tests/jmeter/ci-app.jmx est introuvable."
+                        echo "Adapte le chemin au fichier JMX existant."
                         exit 1
                     fi
 
@@ -228,10 +224,7 @@ pipeline {
             steps {
                 sh '''
                     set -e
-
                     test -s "$WAR_FILE"
-
-                    echo "=== Artefact WAR ==="
                     ls -lh "$WAR_FILE"
                 '''
 
@@ -289,6 +282,18 @@ EOF
                       .
                 '''
 
+                echo '=== Analyse de securite Trivy ==='
+
+                sh '''
+                    set -e
+
+                    trivy image \
+                      --severity HIGH,CRITICAL \
+                      --ignore-unfixed \
+                      --exit-code 1 \
+                      "$DOCKER_IMAGE:$BUILD_NUMBER"
+                '''
+
                 withCredentials([
                     string(
                         credentialsId: 'DOCKERHUB_TOKEN',
@@ -298,14 +303,6 @@ EOF
                     sh '''
                         set -e
 
-                        echo "=== Analyse de securite Trivy ==="
-
-                        trivy image \
-                          --severity HIGH,CRITICAL \
-                          --ignore-unfixed \
-                          --exit-code 1 \
-                          "$DOCKER_IMAGE:$BUILD_NUMBER"
-
                         echo "=== Connexion Docker Hub ==="
 
                         echo "$DOCKERHUB_TOKEN" |
@@ -313,10 +310,29 @@ EOF
                             -u "$DOCKERHUB_USER" \
                             --password-stdin
 
-                        echo "=== Publication des images ==="
+                        # Trois tentatives maximum par tag
+                        for tag in "$BUILD_NUMBER" latest; do
+                            attempt=1
 
-                        docker push "$DOCKER_IMAGE:$BUILD_NUMBER"
-                        docker push "$DOCKER_IMAGE:latest"
+                            while true; do
+                                echo "Publication de $DOCKER_IMAGE:$tag - tentative $attempt/3"
+
+                                if docker push "$DOCKER_IMAGE:$tag"; then
+                                    echo "Publication reussie : $DOCKER_IMAGE:$tag"
+                                    break
+                                fi
+
+                                if [ "$attempt" -ge 3 ]; then
+                                    echo "ERREUR : publication impossible apres 3 tentatives."
+                                    docker logout || true
+                                    exit 1
+                                fi
+
+                                attempt=$((attempt + 1))
+                                echo "Erreur temporaire possible. Attente de 15 secondes..."
+                                sleep 15
+                            done
+                        done
 
                         docker logout
                     '''
@@ -331,7 +347,7 @@ EOF
         }
 
         failure {
-            echo 'Pipeline en echec. Consulter la Console Output de Jenkins.'
+            echo 'Pipeline en echec. Consulter la Console Output pour identifier l etape fautive.'
         }
 
         always {
