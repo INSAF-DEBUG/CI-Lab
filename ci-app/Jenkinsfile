@@ -171,6 +171,17 @@ Si vous recevez ce message, l'envoi depuis emailext fonctionne.
             }
         }
 
+        stage('Prepare Docker Artifact') {
+            steps {
+                echo '=== Préparation de l’artefact pour la VM Docker ==='
+                stash(
+                    name: 'ci-app-war',
+                    includes: 'ci-app/target/ci-app-1.0-SNAPSHOT.war',
+                    useDefaultExcludes: false
+                )
+            }
+        }
+
         stage('JMeter Load Test') {
             steps {
                 echo '=== JMeter Load Test ==='
@@ -246,6 +257,76 @@ Si vous recevez ce message, l'envoi depuis emailext fonctionne.
                     fingerprint: true,
                     allowEmptyArchive: true
                 )
+            }
+        }
+
+        stage('Docker Build, Trivy Scan and Docker Hub Push') {
+            agent {
+                label 'docker-trivy'
+            }
+
+            steps {
+                echo '=== Construction, scan Trivy et publication Docker Hub ==='
+                deleteDir()
+                unstash 'ci-app-war'
+
+                sh '''
+                    set -eu
+
+                    test -f ci-app/target/ci-app-1.0-SNAPSHOT.war
+
+                    cat > Dockerfile <<'EOF'
+FROM tomcat:9.0-jdk21-temurin
+RUN rm -rf /usr/local/tomcat/webapps/*
+COPY ci-app/target/ci-app-1.0-SNAPSHOT.war /usr/local/tomcat/webapps/ci-app.war
+EXPOSE 8080
+CMD ["catalina.sh", "run"]
+EOF
+                '''
+
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub-credentials',
+                        usernameVariable: 'DOCKERHUB_USER',
+                        passwordVariable: 'DOCKERHUB_TOKEN'
+                    )
+                ]) {
+                    sh '''
+                        set -eu
+
+                        IMAGE="$DOCKERHUB_USER/ci-app"
+                        BUILD_TAG="$IMAGE:$BUILD_NUMBER"
+
+                        echo "=== Construction de l'image : $BUILD_TAG ==="
+                        docker build \\
+                            --pull \\
+                            -t "$BUILD_TAG" \\
+                            -t "$IMAGE:latest" .
+
+                        echo "=== Analyse Trivy : vulnérabilités HIGH et CRITICAL ==="
+                        trivy image \\
+                            --severity HIGH,CRITICAL \\
+                            --ignore-unfixed \\
+                            --exit-code 1 \\
+                            "$BUILD_TAG"
+
+                        echo "=== Connexion à Docker Hub ==="
+                        echo "$DOCKERHUB_TOKEN" |
+                            docker login --username "$DOCKERHUB_USER" --password-stdin
+
+                        echo "=== Publication sur Docker Hub ==="
+                        docker push "$BUILD_TAG"
+                        docker push "$IMAGE:latest"
+
+                        docker logout
+                    '''
+                }
+            }
+
+            post {
+                always {
+                    echo '=== Fin de l’étape Docker / Trivy ==='
+                }
             }
         }
     }
