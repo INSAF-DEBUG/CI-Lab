@@ -11,14 +11,16 @@ pipeline {
     }
 
     environment {
-        // Java 17 : correction de PATH+JDK17
+        // Java 17 pour compiler et executer les tests
         JAVA_HOME = '/opt/java/jdk-17.0.20.1+1'
-        PATH = "/opt/java/jdk-17.0.20.1+1/bin:${env.PATH}"
+        MAVEN_OPTS = '-Xmx1024m'
+
+        // A ADAPTER aux chemins reels de l'agent centos-build
+        SONAR_JAVA_HOME = '/opt/java/jdk-21'
+        SONAR_MAVEN_HOME = '/opt/maven/apache-maven-3.9.11'
 
         GIT_URL = 'https://github.com/INSAF-DEBUG/CI-Lab.git'
         APP_DIR = 'ci-app'
-
-        MAVEN_OPTS = '-Xmx1024m'
 
         SONAR_PROJECT_KEY = 'com.insaf.cilab:ci-app'
         SONAR_PROJECT_NAME = 'ci-app'
@@ -26,7 +28,6 @@ pipeline {
         NEXUS_URL = 'http://192.168.42.128:8081'
         NEXUS_REPOSITORY = 'maven-snapshots'
         NEXUS_GROUP_PATH = 'com/insaf/cilab/ci-app/1.0-SNAPSHOT'
-        WAR_NAME = 'ci-app-1.0-SNAPSHOT.war'
 
         DOCKER_IMAGE = 'insafnemri/ci-app'
         DOCKER_BASE_IMAGE = 'tomcat:9.0-jdk21-temurin-noble'
@@ -55,13 +56,14 @@ pipeline {
                 sh '''
                     set -eu
 
+                    test -x "$JAVA_HOME/bin/java"
+
+                    export PATH="$JAVA_HOME/bin:$PATH"
+
                     echo "=== JAVA_HOME ==="
                     echo "$JAVA_HOME"
 
-                    test -x "$JAVA_HOME/bin/java"
-
-                    echo "=== Java ==="
-                    "$JAVA_HOME/bin/java" -version
+                    java -version
 
                     echo "=== Maven ==="
                     mvn -version
@@ -73,7 +75,7 @@ pipeline {
 
         stage('Build') {
             steps {
-                echo '=== Build Maven ==='
+                echo '=== Construction Maven ==='
 
                 dir("${APP_DIR}") {
                     sh '''
@@ -93,15 +95,22 @@ pipeline {
 
         stage('Tests') {
             steps {
-                echo '=== Tests Maven ==='
+                echo '=== Tests unitaires, integration et Selenium ==='
 
                 dir("${APP_DIR}") {
                     sh '''
                         set -eu
 
+                        export PATH="$JAVA_HOME/bin:$PATH"
                         export MOZ_HEADLESS=1
 
                         mvn test
+
+                        test -s target/jacoco.exec
+                        test -s target/site/jacoco/jacoco.xml
+
+                        echo "=== Rapport JaCoCo genere ==="
+                        ls -lh target/site/jacoco/jacoco.xml
                     '''
                 }
             }
@@ -118,21 +127,40 @@ pipeline {
 
         stage('SonarQube Analysis') {
             steps {
-                echo '=== Analyse SonarQube ==='
+                echo '=== Analyse SonarQube avec Java 21 ==='
 
                 dir("${APP_DIR}") {
-                    withSonarQubeEnv('SonarQube') {
-                        sh '''
-                            set -eu
+                    withEnv([
+                        "JAVA_HOME=${SONAR_JAVA_HOME}",
+                        "PATH+SONAR_JAVA=${SONAR_JAVA_HOME}/bin",
+                        "PATH+SONAR_MAVEN=${SONAR_MAVEN_HOME}/bin"
+                    ]) {
+                        withSonarQubeEnv('SonarQube') {
+                            sh '''
+                                set -eu
 
-                            mvn sonar:sonar \
-                              -Dsonar.projectKey="${SONAR_PROJECT_KEY}" \
-                              -Dsonar.projectName="${SONAR_PROJECT_NAME}" \
-                              -Dsonar.sources=src/main/java \
-                              -Dsonar.tests=src/test/java \
-                              -Dsonar.exclusions="**/target/**,**/*.js,**/*.ts,**/*.css,**/src/main/webapp/**" \
-                              -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
-                        '''
+                                test -x "$JAVA_HOME/bin/java"
+                                test -x "$SONAR_MAVEN_HOME/bin/mvn"
+
+                                echo "=== Java du scanner ==="
+                                java -version
+
+                                echo "=== Maven du scanner ==="
+                                "$SONAR_MAVEN_HOME/bin/mvn" -version
+
+                                echo "=== Rapport de couverture ==="
+                                test -s target/site/jacoco/jacoco.xml
+
+                                "$SONAR_MAVEN_HOME/bin/mvn" \
+                                  org.sonarsource.scanner.maven:sonar-maven-plugin:5.2.0.4988:sonar \
+                                  -Dsonar.projectKey="$SONAR_PROJECT_KEY" \
+                                  -Dsonar.projectName="$SONAR_PROJECT_NAME" \
+                                  -Dsonar.sources=src/main/java \
+                                  -Dsonar.tests=src/test/java \
+                                  -Dsonar.exclusions="**/target/**,**/*.js,**/*.ts,**/*.css,**/src/main/webapp/**" \
+                                  -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
+                            '''
+                        }
                     }
                 }
             }
@@ -140,7 +168,7 @@ pipeline {
 
         stage('Quality Gate') {
             steps {
-                echo '=== Quality Gate SonarQube ==='
+                echo '=== Verification du Quality Gate ==='
 
                 timeout(time: 10, unit: 'MINUTES') {
                     waitForQualityGate(
@@ -160,6 +188,8 @@ pipeline {
 
                         test -s target/ci-app-1.0-SNAPSHOT.war
 
+                        export PATH="$JAVA_HOME/bin:$PATH"
+
                         mvn deploy -DskipTests
 
                         echo "=== WAR publie dans Nexus ==="
@@ -170,10 +200,10 @@ pipeline {
 
         stage('JMeter Load Test') {
             steps {
-                echo '=== JMeter Load Test ==='
+                echo '=== Test de charge JMeter ==='
 
                 script {
-                    if (fileExists('jmeter')) {
+                    if (fileExists('jmeter/test-plan.jmx')) {
                         sh '''
                             set -eu
 
@@ -182,23 +212,21 @@ pipeline {
                             elif command -v jmeter >/dev/null 2>&1; then
                                 JMETER="jmeter"
                             else
-                                echo "JMeter non installe : etape ignoree."
+                                echo "JMeter absent : etape ignoree."
                                 exit 0
                             fi
 
-                            if [ -f jmeter/test-plan.jmx ]; then
-                                mkdir -p ci-app/target
+                            mkdir -p ci-app/target
 
-                                "$JMETER" -n \
-                                  -t jmeter/test-plan.jmx \
-                                  -l ci-app/target/jmeter-results.jtl \
-                                  -j ci-app/target/jmeter.log
-                            else
-                                echo "Plan JMeter absent : etape ignoree."
-                            fi
+                            "$JMETER" -n \
+                              -t jmeter/test-plan.jmx \
+                              -l ci-app/target/jmeter-results.jtl \
+                              -j ci-app/target/jmeter.log
+
+                            echo "=== Test de charge termine ==="
                         '''
                     } else {
-                        echo 'Repertoire jmeter absent : etape ignoree.'
+                        echo 'Plan JMeter absent : etape ignoree.'
                     }
                 }
             }
@@ -222,7 +250,7 @@ pipeline {
 
                 archiveArtifacts(
                     artifacts: 'ci-app/target/surefire-reports/*.xml',
-                    allowEmptyArchive: true,
+                    allowEmptyArchive: false,
                     fingerprint: true
                 )
 
@@ -240,7 +268,7 @@ pipeline {
             }
 
             steps {
-                echo '=== Recuperation Nexus, Docker Build, Trivy et Docker Hub ==='
+                echo '=== Recuperation Nexus, Docker, Trivy et Docker Hub ==='
 
                 deleteDir()
 
@@ -265,54 +293,35 @@ pipeline {
                           --output /tmp/maven-metadata.xml \
                           "$METADATA_URL"
 
-                        echo "=== Resolution du dernier snapshot WAR ==="
-
-                        SNAPSHOT_VERSION=$(python3 -c '
+                        SNAPSHOT_VERSION=$(python -c '
 import xml.etree.ElementTree as ET
 
 root = ET.parse("/tmp/maven-metadata.xml").getroot()
+ns = {"m": root.tag.split("}")[0].strip("{")} if "}" in root.tag else {}
 
-ns = (
-    {"m": root.tag.split("}")[0].strip("{")}
-    if "}" in root.tag else {}
-)
-
-nodes = (
-    root.findall(".//m:snapshotVersion", ns)
-    if ns else root.findall(".//snapshotVersion")
-)
+nodes = root.findall(".//m:snapshotVersion", ns) if ns else root.findall(".//snapshotVersion")
 
 for node in nodes:
-    extension = (
-        node.findtext("m:extension", default="", namespaces=ns)
-        if ns else node.findtext("extension", default="")
+    get = lambda key: (
+        node.findtext("m:" + key, default="", namespaces=ns)
+        if ns else node.findtext(key, default="")
     )
 
-    classifier = (
-        node.findtext("m:classifier", default="", namespaces=ns)
-        if ns else node.findtext("classifier", default="")
-    )
-
-    value = (
-        node.findtext("m:value", default="", namespaces=ns)
-        if ns else node.findtext("value", default="")
-    )
-
-    if extension == "war" and not classifier and value:
-        print(value)
-        break
+    if get("extension") == "war" and not get("classifier"):
+        value = get("value")
+        if value:
+            print(value)
+            break
 ')
 
                         if [ -z "$SNAPSHOT_VERSION" ]; then
-                            echo "ERREUR : aucun WAR snapshot trouve dans Nexus."
+                            echo "ERREUR : aucun WAR snapshot trouve."
                             exit 1
                         fi
 
-                        echo "Snapshot trouve : $SNAPSHOT_VERSION"
+                        echo "Snapshot : $SNAPSHOT_VERSION"
 
                         WAR_URL="${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/${NEXUS_GROUP_PATH}/ci-app-${SNAPSHOT_VERSION}.war"
-
-                        echo "=== Telechargement du WAR depuis Nexus ==="
 
                         curl --fail --silent --show-error \
                           --user "$NEXUS_USER:$NEXUS_PASSWORD" \
@@ -328,16 +337,10 @@ for node in nodes:
                 sh '''
                     set -eu
 
-                    cat > Dockerfile <<'EOF'
-FROM tomcat:9.0-jdk21-temurin-noble
+                    cat > Dockerfile <<EOF
+FROM ${DOCKER_BASE_IMAGE}
 
-RUN rm -rf /usr/local/tomcat/webapps/* \
-    && (getent group tomcat >/dev/null || groupadd --system tomcat) \
-    && (id -u tomcat >/dev/null 2>&1 || \
-        useradd --system --gid tomcat \
-        --home-dir /usr/local/tomcat \
-        --no-create-home tomcat) \
-    && chown -R tomcat:tomcat /usr/local/tomcat
+RUN rm -rf /usr/local/tomcat/webapps/*
 
 COPY --chown=tomcat:tomcat ci-app/target/ci-app-1.0-SNAPSHOT.war /usr/local/tomcat/webapps/ci-app.war
 
@@ -345,7 +348,7 @@ EXPOSE 8080
 
 USER tomcat
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \\
     CMD bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/8080' || exit 1
 
 CMD ["catalina.sh", "run"]
@@ -364,10 +367,10 @@ EOF
                     sh '''
                         set -eu
 
-                        IMAGE="${DOCKER_IMAGE}"
+                        IMAGE="$DOCKER_IMAGE"
                         BUILD_TAG="${IMAGE}:${BUILD_NUMBER}"
 
-                        echo "=== Construction de ${BUILD_TAG} ==="
+                        echo "=== Construction Docker ==="
 
                         docker build --pull \
                           -t "$BUILD_TAG" \
@@ -383,7 +386,7 @@ EOF
                           --exit-code 1 \
                           "$BUILD_TAG"
 
-                        echo "=== Scan Trivy termine sans findings bloquants ==="
+                        echo "=== Scan Trivy reussi ==="
 
                         echo "=== Connexion Docker Hub ==="
 
@@ -408,7 +411,7 @@ EOF
 
             post {
                 always {
-                    echo '=== Fin de l etape Docker / Trivy ==='
+                    echo '=== Fin de l'etape Docker / Trivy ==='
                 }
             }
         }
@@ -416,11 +419,11 @@ EOF
 
     post {
         success {
-            echo '=== CI/CD SUCCESS : Pipeline termine avec succes ==='
+            echo '=== CI/CD SUCCESS : Pipeline termine ==='
         }
 
         failure {
-            echo '=== CI/CD FAILURE : Verifier les logs Jenkins ==='
+            echo '=== CI/CD FAILURE : Consulter les logs Jenkins ==='
         }
 
         always {
