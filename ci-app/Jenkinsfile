@@ -53,33 +53,6 @@ pipeline {
             }
         }
 
-        /*
-        ============================================================
-        NOTIFICATION EMAIL DE TEST DESACTIVEE TEMPORAIREMENT
-        A REACTIVER APRES CORRECTION
-        ============================================================
-
-        stage('Test Email Notification') {
-            steps {
-                script {
-                    emailext(
-                        to: env.EMAIL_TO,
-                        subject: "[TEST PIPELINE] ${env.JOB_NAME} - Build #${env.BUILD_NUMBER}",
-                        mimeType: 'text/plain',
-                        body: """
-Test d'envoi depuis Jenkins.
-
-Projet : ${env.JOB_NAME}
-Build : #${env.BUILD_NUMBER}
-Statut : ${currentBuild.currentResult}
-URL : ${env.BUILD_URL}
-"""
-                    )
-                }
-            }
-        }
-        */
-
         stage('Build') {
             steps {
                 echo '=== Build Maven ==='
@@ -286,13 +259,31 @@ URL : ${env.BUILD_URL}
                         SNAPSHOT_VERSION="$(
                             python -c '
 import xml.etree.ElementTree as ET
+
 root = ET.parse("/tmp/maven-metadata.xml").getroot()
 ns = {"m": root.tag.split("}")[0].strip("{")} if "}" in root.tag else {}
-nodes = root.findall(".//m:snapshotVersion", ns) if ns else root.findall(".//snapshotVersion")
+
+nodes = (
+    root.findall(".//m:snapshotVersion", ns)
+    if ns else root.findall(".//snapshotVersion")
+)
+
 for node in nodes:
-    ext = node.findtext("m:extension", default="", namespaces=ns) if ns else node.findtext("extension", default="")
-    classifier = node.findtext("m:classifier", default="", namespaces=ns) if ns else node.findtext("classifier", default="")
-    value = node.findtext("m:value", default="", namespaces=ns) if ns else node.findtext("value", default="")
+    ext = (
+        node.findtext("m:extension", default="", namespaces=ns)
+        if ns else node.findtext("extension", default="")
+    )
+
+    classifier = (
+        node.findtext("m:classifier", default="", namespaces=ns)
+        if ns else node.findtext("classifier", default="")
+    )
+
+    value = (
+        node.findtext("m:value", default="", namespaces=ns)
+        if ns else node.findtext("value", default="")
+    )
+
     if ext == "war" and not classifier and value:
         print(value)
         break
@@ -325,13 +316,23 @@ for node in nodes:
                     set -eu
 
                     cat > Dockerfile <<'EOF'
-FROM tomcat:9.0-jdk21-temurin
+FROM tomcat:9.0-jdk21-temurin-noble
 
-RUN rm -rf /usr/local/tomcat/webapps/*
+RUN rm -rf /usr/local/tomcat/webapps/* \
+    && groupadd --system tomcat \
+    && useradd --system --gid tomcat \
+       --home-dir /usr/local/tomcat \
+       --no-create-home tomcat \
+    && chown -R tomcat:tomcat /usr/local/tomcat
 
-COPY ci-app/target/ci-app-1.0-SNAPSHOT.war /usr/local/tomcat/webapps/ci-app.war
+COPY --chown=tomcat:tomcat ci-app/target/ci-app-1.0-SNAPSHOT.war /usr/local/tomcat/webapps/ci-app.war
 
 EXPOSE 8080
+
+USER tomcat
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/8080' || exit 1
 
 CMD ["catalina.sh", "run"]
 EOF
@@ -417,56 +418,8 @@ EOF
         always {
 
             /*
-            ============================================================
-            NOTIFICATION FINALE TEMPORAIREMENT DESACTIVEE
-
-            La section emailext sera corrigee et reactivee plus tard.
-
-            script {
-                def finalStatus =
-                    currentBuild.currentResult ?: 'UNKNOWN'
-
-                def statusColor = '#666666'
-
-                if (finalStatus == 'SUCCESS') {
-                    statusColor = '#228B22'
-                } else if (finalStatus == 'FAILURE') {
-                    statusColor = '#CC0000'
-                } else if (finalStatus == 'UNSTABLE') {
-                    statusColor = '#E69500'
-                } else if (finalStatus == 'ABORTED') {
-                    statusColor = '#666666'
-                }
-
-                def emailSubject =
-                    "[${finalStatus}] ${env.JOB_NAME} - Build #${env.BUILD_NUMBER}"
-
-                def emailBody = """
-<html>
-<body style="font-family: Arial, sans-serif;">
-    <h2 style="color: ${statusColor};">
-        Notification Jenkins : ${finalStatus}
-    </h2>
-    <p>Projet : ${env.JOB_NAME}</p>
-    <p>Build : #${env.BUILD_NUMBER}</p>
-    <p>Duree : ${currentBuild.durationString}</p>
-    <p><a href="${env.BUILD_URL}">Consulter le build Jenkins</a></p>
-    <p><a href="${env.BUILD_URL}console">Console Output</a></p>
-</body>
-</html>
-"""
-
-                try {
-                    emailext(
-                        to: env.EMAIL_TO,
-                        subject: emailSubject,
-                        mimeType: 'text/html',
-                        body: emailBody
-                    )
-                } catch (Exception e) {
-                    echo "Erreur notification : ${e.getMessage()}"
-                }
-            }
+            Notification email desactivee temporairement.
+            A reactiver apres correction.
             */
 
             echo '=== Pipeline termine ==='
