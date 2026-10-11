@@ -1,3 +1,4 @@
+
 pipeline {
     agent {
         label 'centos-build'
@@ -10,9 +11,9 @@ pipeline {
     }
 
     environment {
-        // Java 17
+        // Java 17 : correction de PATH+JDK17
         JAVA_HOME = '/opt/java/jdk-17.0.20.1+1'
-        PATH+JDK17 = '/opt/java/jdk-17.0.20.1+1/bin'
+        PATH = "/opt/java/jdk-17.0.20.1+1/bin:${env.PATH}"
 
         GIT_URL = 'https://github.com/INSAF-DEBUG/CI-Lab.git'
         APP_DIR = 'ci-app'
@@ -57,8 +58,10 @@ pipeline {
                     echo "=== JAVA_HOME ==="
                     echo "$JAVA_HOME"
 
+                    test -x "$JAVA_HOME/bin/java"
+
                     echo "=== Java ==="
-                    java -version
+                    "$JAVA_HOME/bin/java" -version
 
                     echo "=== Maven ==="
                     mvn -version
@@ -264,7 +267,7 @@ pipeline {
 
                         echo "=== Resolution du dernier snapshot WAR ==="
 
-                        SNAPSHOT_VERSION=$(python -c '
+                        SNAPSHOT_VERSION=$(python3 -c '
 import xml.etree.ElementTree as ET
 
 root = ET.parse("/tmp/maven-metadata.xml").getroot()
@@ -280,7 +283,7 @@ nodes = (
 )
 
 for node in nodes:
-    ext = (
+    extension = (
         node.findtext("m:extension", default="", namespaces=ns)
         if ns else node.findtext("extension", default="")
     )
@@ -295,7 +298,7 @@ for node in nodes:
         if ns else node.findtext("value", default="")
     )
 
-    if ext == "war" and not classifier and value:
+    if extension == "war" and not classifier and value:
         print(value)
         break
 ')
@@ -329,10 +332,11 @@ for node in nodes:
 FROM tomcat:9.0-jdk21-temurin-noble
 
 RUN rm -rf /usr/local/tomcat/webapps/* \
-    && groupadd --system tomcat \
-    && useradd --system --gid tomcat \
-       --home-dir /usr/local/tomcat \
-       --no-create-home tomcat \
+    && (getent group tomcat >/dev/null || groupadd --system tomcat) \
+    && (id -u tomcat >/dev/null 2>&1 || \
+        useradd --system --gid tomcat \
+        --home-dir /usr/local/tomcat \
+        --no-create-home tomcat) \
     && chown -R tomcat:tomcat /usr/local/tomcat
 
 COPY --chown=tomcat:tomcat ci-app/target/ci-app-1.0-SNAPSHOT.war /usr/local/tomcat/webapps/ci-app.war
@@ -360,7 +364,7 @@ EOF
                     sh '''
                         set -eu
 
-                        IMAGE="insafnemri/ci-app"
+                        IMAGE="${DOCKER_IMAGE}"
                         BUILD_TAG="${IMAGE}:${BUILD_NUMBER}"
 
                         echo "=== Construction de ${BUILD_TAG} ==="
@@ -391,7 +395,6 @@ EOF
                         echo "=== Publication Docker Hub ==="
 
                         docker push "$BUILD_TAG"
-
                         docker push "${IMAGE}:latest"
 
                         echo "=== Images publiees ==="
@@ -413,15 +416,15 @@ EOF
 
     post {
         success {
-            echo '=== CI SUCCESS : Pipeline termine avec succes ==='
+            echo '=== CI/CD SUCCESS : Pipeline termine avec succes ==='
         }
 
         failure {
-            echo '=== CI FAILURE : Verifier les logs Jenkins ==='
+            echo '=== CI/CD FAILURE : Verifier les logs Jenkins ==='
         }
 
         always {
             cleanWs()
         }
     }
-} corrige ce file
+}
