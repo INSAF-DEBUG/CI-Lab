@@ -1,4 +1,3 @@
-
 pipeline {
     agent {
         label 'centos-build'
@@ -46,7 +45,8 @@ pipeline {
                 checkout scm
 
                 sh '''
-                    set -e
+                    set -eu
+
                     echo "=== Depot Git ==="
                     git log -1 --oneline
 
@@ -60,7 +60,7 @@ pipeline {
         stage('2 - Verification Java et Maven') {
             steps {
                 sh '''
-                    set -e
+                    set -eu
 
                     echo "=== Java ==="
                     java -version
@@ -79,13 +79,13 @@ pipeline {
             steps {
                 dir('ci-app') {
                     sh '''
-                        set -e
+                        set -eu
                         mvn -B clean package -DskipTests
                     '''
                 }
 
                 sh '''
-                    set -e
+                    set -eu
                     test -s "$WAR_FILE"
                     ls -lh "$WAR_FILE"
                 '''
@@ -96,7 +96,8 @@ pipeline {
             steps {
                 dir('ci-app') {
                     sh '''
-                        set -e
+                        set -eu
+
                         export MOZ_HEADLESS=1
 
                         mvn -B \
@@ -135,7 +136,7 @@ pipeline {
                 dir('ci-app') {
                     withSonarQubeEnv('SonarQube') {
                         sh '''
-                            set -e
+                            set -eu
 
                             mvn -B sonar:sonar \
                               -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
@@ -165,7 +166,7 @@ pipeline {
             steps {
                 dir('ci-app') {
                     sh '''
-                        set -e
+                        set -eu
 
                         echo "=== Verification de Nexus ==="
 
@@ -190,13 +191,12 @@ pipeline {
 
             steps {
                 sh '''
-                    set -e
+                    set -eu
 
                     command -v jmeter
 
                     if [ ! -f tests/jmeter/ci-app.jmx ]; then
                         echo "ERREUR : tests/jmeter/ci-app.jmx est introuvable."
-                        echo "Adapte le chemin au fichier JMX existant."
                         exit 1
                     fi
 
@@ -220,10 +220,10 @@ pipeline {
             }
         }
 
-        stage('9 - Archivage et preparation WAR') {
+        stage('9 - Archivage du WAR') {
             steps {
                 sh '''
-                    set -e
+                    set -eu
                     test -s "$WAR_FILE"
                     ls -lh "$WAR_FILE"
                 '''
@@ -231,11 +231,6 @@ pipeline {
                 archiveArtifacts(
                     artifacts: 'ci-app/target/ci-app-1.0-SNAPSHOT.war',
                     fingerprint: true
-                )
-
-                stash(
-                    name: 'ci-app-war',
-                    includes: 'ci-app/target/ci-app-1.0-SNAPSHOT.war'
                 )
             }
         }
@@ -246,19 +241,61 @@ pipeline {
             }
 
             steps {
-                unstash 'ci-app-war'
-
+                // Telecharger le WAR depuis Nexus
                 sh '''
-                    set -e
+                    set -eu
 
-                    echo "=== Verification Docker ==="
+                    echo "=== Verification des outils ==="
+                    command -v curl
+                    command -v python3
                     docker --version
-                    docker info
-
-                    echo "=== Verification Trivy ==="
                     trivy --version
 
+                    mkdir -p ci-app/target
+
+                    echo "=== Recherche du WAR dans Nexus ==="
+
+                    curl -fsS --get \
+                      "$NEXUS_URL/service/rest/v1/search/assets" \
+                      --data-urlencode "repository=$NEXUS_REPO" \
+                      --data-urlencode "maven.artifactId=$APP_NAME" \
+                      --data-urlencode "maven.baseVersion=$APP_VERSION" \
+                      --data-urlencode "maven.extension=war" \
+                      -o /tmp/nexus-assets.json
+
+                    DOWNLOAD_URL=$(python3 -c '
+import json
+with open("/tmp/nexus-assets.json") as f:
+    data = json.load(f)
+
+items = [
+    item["downloadUrl"]
+    for item in data.get("items", [])
+    if item.get("downloadUrl", "").endswith(".war")
+]
+
+if len(items) != 1:
+    raise SystemExit(
+        "Erreur : un seul WAR attendu, nombre trouve : "
+        + str(len(items))
+    )
+
+print(items[0])
+')
+
+                    echo "=== Telechargement du WAR ==="
+
+                    curl -fSL \
+                      "$DOWNLOAD_URL" \
+                      -o "$WAR_FILE"
+
                     test -s "$WAR_FILE"
+                    ls -lh "$WAR_FILE"
+                '''
+
+                // Construire l'image a partir du WAR telecharge
+                sh '''
+                    set -eu
 
                     cat > Dockerfile <<'EOF'
 FROM tomcat:9.0-jdk21-temurin-noble
@@ -282,10 +319,11 @@ EOF
                       .
                 '''
 
-                echo '=== Analyse de securite Trivy ==='
-
+                // Scanner l'image avec Trivy
                 sh '''
-                    set -e
+                    set -eu
+
+                    echo "=== Scan de securite Trivy ==="
 
                     trivy image \
                       --severity HIGH,CRITICAL \
@@ -294,6 +332,7 @@ EOF
                       "$DOCKER_IMAGE:$BUILD_NUMBER"
                 '''
 
+                // Publier sur Docker Hub seulement si le scan reussit
                 withCredentials([
                     string(
                         credentialsId: 'DOCKERHUB_TOKEN',
@@ -301,7 +340,7 @@ EOF
                     )
                 ]) {
                     sh '''
-                        set -e
+                        set -eu
 
                         echo "=== Connexion Docker Hub ==="
 
@@ -310,7 +349,6 @@ EOF
                             -u "$DOCKERHUB_USER" \
                             --password-stdin
 
-                        # Trois tentatives maximum par tag
                         for tag in "$BUILD_NUMBER" latest; do
                             attempt=1
 
@@ -329,7 +367,7 @@ EOF
                                 fi
 
                                 attempt=$((attempt + 1))
-                                echo "Erreur temporaire possible. Attente de 15 secondes..."
+                                echo "Nouvelle tentative dans 15 secondes..."
                                 sleep 15
                             done
                         done
@@ -347,7 +385,7 @@ EOF
         }
 
         failure {
-            echo 'Pipeline en echec. Consulter la Console Output pour identifier l etape fautive.'
+            echo 'Pipeline en echec. Consulter la Console Output.'
         }
 
         always {
