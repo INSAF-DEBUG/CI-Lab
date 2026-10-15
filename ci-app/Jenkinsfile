@@ -254,8 +254,8 @@ pipeline {
 
                     echo "=== Verification des outils ==="
                     command -v curl
+                    command -v jq
                     command -v grep
-                    command -v sed
                     docker --version
                     trivy --version
 
@@ -275,6 +275,7 @@ pipeline {
                         echo "=== Recherche du WAR dans Nexus ==="
 
                         curl -fsS \
+                          --connect-timeout 10 \
                           --user "$NEXUS_USER:$NEXUS_PASSWORD" \
                           --get "$NEXUS_URL/service/rest/v1/search/assets" \
                           --data-urlencode "repository=$NEXUS_REPO" \
@@ -283,18 +284,27 @@ pipeline {
                           --data-urlencode "maven.extension=war" \
                           -o /tmp/nexus-assets.json
 
+                        echo "=== Reponse de Nexus ==="
+                        jq '{items: [.items[]? | {path, downloadUrl}]}' \
+                          /tmp/nexus-assets.json
+
                         echo "=== Extraction de l'URL du WAR ==="
 
-                        grep -oE '"downloadUrl"[[:space:]]*:[[:space:]]*"[^"]+\\.war"' \
-                          /tmp/nexus-assets.json |
-                          sed -E 's/^"downloadUrl"[[:space:]]*:[[:space:]]*"([^"]+)"$/\\1/' \
+                        jq -r '
+                          .items[]?
+                          | select(
+                              (.path // "") | endswith(".war")
+                            )
+                          | .downloadUrl // empty
+                        ' /tmp/nexus-assets.json \
                           > /tmp/nexus-war-urls.txt
 
-                        WAR_COUNT=$(wc -l < /tmp/nexus-war-urls.txt | tr -d ' ')
+                        WAR_COUNT=$(grep -c . /tmp/nexus-war-urls.txt || true)
 
                         if [ "$WAR_COUNT" -ne 1 ]; then
                             echo "ERREUR : un seul WAR attendu, nombre trouve : $WAR_COUNT"
-                            cat /tmp/nexus-war-urls.txt
+                            echo "Reponse JSON complete :"
+                            cat /tmp/nexus-assets.json
                             exit 1
                         fi
 
@@ -303,6 +313,7 @@ pipeline {
                         echo "=== Telechargement du WAR ==="
 
                         curl -fSL \
+                          --connect-timeout 10 \
                           --user "$NEXUS_USER:$NEXUS_PASSWORD" \
                           "$DOWNLOAD_URL" \
                           -o "$WAR_FILE"
@@ -480,6 +491,7 @@ EOF
 
                         if [ "$ATTEMPT" -ge "$MAX_ATTEMPTS" ]; then
                             echo "ERREUR : les replicas ne sont pas tous Running."
+                            docker logout || true
                             exit 1
                         fi
 
