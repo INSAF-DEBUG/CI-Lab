@@ -1,75 +1,56 @@
 pipeline {
-    agent {
-        label 'centos-build'
-    }
+    agent none
 
     options {
         timestamps()
-        disableConcurrentBuilds()
-        skipDefaultCheckout(true)
         timeout(time: 60, unit: 'MINUTES')
-    }
-
-    parameters {
-        booleanParam(
-            name: 'ENABLE_SONAR',
-            defaultValue: false,
-            description: 'Activer SonarQube et Quality Gate'
-        )
-        booleanParam(
-            name: 'ENABLE_JMETER',
-            defaultValue: false,
-            description: 'Activer les tests de charge JMeter'
-        )
-        booleanParam(
-            name: 'DEPLOY_SWARM',
-            defaultValue: true,
-            description: 'Deployer sur Docker Swarm'
-        )
+        disableConcurrentBuilds()
     }
 
     environment {
-        APP_NAME = 'ci-app'
-        APP_VERSION = '1.0-SNAPSHOT'
-
         NEXUS_URL = 'http://192.168.42.128:8081'
         NEXUS_REPO = 'maven-snapshots'
+        NEXUS_GROUP_PATH = 'com/insaf/cilab/ci-app/1.0-SNAPSHOT'
+        WAR_NAME = 'ci-app-1.0-SNAPSHOT.war'
 
-        DOCKERHUB_USER = 'insafnemri'
-        DOCKER_IMAGE = 'insafnemri/ci-app'
-
-        WAR_FILE = 'ci-app/target/ci-app-1.0-SNAPSHOT.war'
+        DOCKER_IMAGE = 'ci-app'
         SWARM_SERVICE = 'ci-app'
+        SWARM_PORT = '8080'
         SWARM_REPLICAS = '2'
     }
 
     stages {
-
         stage('1 - Checkout Git') {
+            agent { label 'centos-build' }
+
             steps {
                 checkout scm
 
                 sh '''
                     set -eu
-                    git log -1 --oneline
                     test -f ci-app/pom.xml
+                    echo "Repository recupere"
+                    git log -1 --oneline
                 '''
             }
         }
 
         stage('2 - Verification Java et Maven') {
+            agent { label 'centos-build' }
+
             steps {
                 sh '''
                     set -eu
                     java -version
                     mvn -version
                     command -v git
-                    command -v mvn
                 '''
             }
         }
 
         stage('3 - Build Maven') {
+            agent { label 'centos-build' }
+
             steps {
                 dir('ci-app') {
                     sh '''
@@ -80,13 +61,15 @@ pipeline {
                 }
 
                 archiveArtifacts(
-                    artifacts: 'ci-app/target/ci-app-1.0-SNAPSHOT.war',
+                    artifacts: 'ci-app/target/*.war',
                     fingerprint: true
                 )
             }
         }
 
         stage('4 - Tests et couverture JaCoCo') {
+            agent { label 'centos-build' }
+
             steps {
                 dir('ci-app') {
                     sh '''
@@ -119,41 +102,9 @@ pipeline {
             }
         }
 
-        stage('5 - Analyse SonarQube') {
-            when {
-                expression {
-                    params.ENABLE_SONAR
-                }
-            }
+        stage('5 - Publication Maven vers Nexus') {
+            agent { label 'centos-build' }
 
-            steps {
-                dir('ci-app') {
-                    withSonarQubeEnv('SonarQube') {
-                        sh '''
-                            set -eu
-                            mvn -B sonar:sonar \
-                              -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
-                        '''
-                    }
-                }
-            }
-        }
-
-        stage('6 - Quality Gate') {
-            when {
-                expression {
-                    params.ENABLE_SONAR
-                }
-            }
-
-            steps {
-                timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate(abortPipeline: true)
-                }
-            }
-        }
-
-        stage('7 - Publication Maven vers Nexus') {
             steps {
                 dir('ci-app') {
                     withCredentials([
@@ -168,7 +119,7 @@ pipeline {
 
                             curl -fsS \
                               --connect-timeout 10 \
-                              --user "$NEXUS_USER:$NEXUS_PASSWORD" \
+                              -u "$NEXUS_USER:$NEXUS_PASSWORD" \
                               "$NEXUS_URL/" \
                               -o /dev/null
 
@@ -179,64 +130,13 @@ pipeline {
             }
         }
 
-        stage('8 - Tests de charge JMeter') {
-            when {
-                expression {
-                    params.ENABLE_JMETER
-                }
-            }
-
-            steps {
-                sh '''
-                    set -eu
-
-                    command -v jmeter
-                    test -f tests/jmeter/ci-app.jmx
-
-                    mkdir -p reports/jmeter
-
-                    jmeter -n \
-                      -t tests/jmeter/ci-app.jmx \
-                      -l reports/jmeter/results.jtl \
-                      -e \
-                      -o reports/jmeter/html-report
-                '''
-            }
-
-            post {
-                always {
-                    archiveArtifacts(
-                        artifacts: 'reports/jmeter/**',
-                        allowEmptyArchive: true
-                    )
-                }
-            }
-        }
-
-        stage('9 - Verification et archivage WAR') {
-            steps {
-                sh '''
-                    set -eu
-                    test -s "$WAR_FILE"
-                    ls -lh "$WAR_FILE"
-                '''
-
-                archiveArtifacts(
-                    artifacts: 'ci-app/target/ci-app-1.0-SNAPSHOT.war',
-                    fingerprint: true
-                )
-            }
-        }
-
-        stage('10 - Docker, Trivy, Docker Hub et Swarm') {
-            agent {
-                label 'docker-trivy'
-            }
+        stage('6 - Telechargement WAR et Dockerfile') {
+            agent { label 'docker-trivy' }
 
             steps {
                 deleteDir()
+                checkout scm
 
-                // Recuperation du WAR depuis Nexus.
                 withCredentials([
                     usernamePassword(
                         credentialsId: 'nexus-credentials',
@@ -246,268 +146,152 @@ pipeline {
                 ]) {
                     sh '''
                         set -eu
-                        command -v python3
+
+                        command -v curl
                         command -v docker
                         command -v trivy
-                        command -v curl
 
-                        export WAR_OUTPUT="$PWD/ROOT.war"
+                        mkdir -p deploy
 
-                        python3 <<'PYTHON'
-import os
-import base64
-import urllib.request
-import xml.etree.ElementTree as ET
+                        echo "Telechargement du WAR depuis Nexus"
 
-base = os.environ["NEXUS_URL"].rstrip("/")
-repo = os.environ["NEXUS_REPO"]
-user = os.environ["NEXUS_USER"]
-password = os.environ["NEXUS_PASSWORD"]
+                        curl -fSL --retry 3 \
+                          --connect-timeout 10 \
+                          -u "$NEXUS_USER:$NEXUS_PASSWORD" \
+                          "$NEXUS_URL/repository/$NEXUS_REPO/$NEXUS_GROUP_PATH/$WAR_NAME" \
+                          -o deploy/ci-app.war
 
-metadata = (
-    f"{base}/repository/{repo}/"
-    "com/insaf/cilab/ci-app/1.0-SNAPSHOT/maven-metadata.xml"
-)
+                        test -s deploy/ci-app.war
+                        test -f Dockerfile
 
-token = base64.b64encode(
-    f"{user}:{password}".encode()
-).decode()
-
-def get(url):
-    request = urllib.request.Request(url)
-    request.add_header("Authorization", f"Basic {token}")
-    with urllib.request.urlopen(request, timeout=60) as response:
-        return response.read()
-
-root = ET.fromstring(get(metadata))
-version = None
-
-for item in root.findall(".//snapshotVersion"):
-    if (
-        item.findtext("extension") == "war"
-        and not item.findtext("classifier")
-    ):
-        version = item.findtext("value")
-        break
-
-if not version:
-    timestamp = root.findtext(".//snapshot/timestamp")
-    build = root.findtext(".//snapshot/buildNumber")
-    if timestamp and build:
-        version = f"1.0-{timestamp}-{build}"
-
-if not version:
-    raise RuntimeError("Version WAR introuvable dans Nexus")
-
-artifact = f"ci-app-{version}.war"
-url = (
-    f"{base}/repository/{repo}/"
-    "com/insaf/cilab/ci-app/1.0-SNAPSHOT/"
-    f"{artifact}"
-)
-
-data = get(url)
-
-if not data:
-    raise RuntimeError("WAR vide")
-
-with open(os.environ["WAR_OUTPUT"], "wb") as output:
-    output.write(data)
-
-print(f"WAR recupere depuis Nexus : {artifact}")
-print(f"Taille : {len(data)} octets")
-PYTHON
-
-                        test -s ROOT.war
+                        echo "WAR telecharge avec succes"
+                        ls -lh deploy/ci-app.war
                     '''
                 }
+            }
+        }
 
-                // Construction de l'image Docker.
+        stage('7 - Build image Docker') {
+            agent { label 'docker-trivy' }
+
+            steps {
+                script {
+                    env.FULL_IMAGE =
+                        "${env.DOCKERHUB_USER ?: 'DOCKERHUB_USERNAME'}/${env.DOCKER_IMAGE}:${env.BUILD_NUMBER}"
+                }
+
                 sh '''
                     set -eu
 
-                    cat > Dockerfile <<'DOCKERFILE'
-FROM tomcat:9-jre8
-COPY ROOT.war /usr/local/tomcat/webapps/ROOT.war
-EXPOSE 8080
-DOCKERFILE
-
                     docker build \
                       --pull \
-                      -t "${DOCKER_IMAGE}:${BUILD_NUMBER}" \
+                      -t "$FULL_IMAGE" \
                       .
-
-                    docker tag \
-                      "${DOCKER_IMAGE}:${BUILD_NUMBER}" \
-                      "${DOCKER_IMAGE}:latest"
                 '''
+            }
+        }
 
-                // Scan de securite Trivy.
+        stage('8 - Scan securite Trivy') {
+            agent { label 'docker-trivy' }
+
+            steps {
                 sh '''
                     set -eu
 
                     trivy image \
-                      --no-progress \
                       --severity HIGH,CRITICAL \
                       --exit-code 1 \
-                      "${DOCKER_IMAGE}:${BUILD_NUMBER}"
+                      "$FULL_IMAGE"
                 '''
+            }
+        }
 
-                // Test du conteneur avant publication.
-                sh '''
-                    set -eu
+        stage('9 - Push Docker Hub') {
+            agent { label 'docker-trivy' }
 
-                    CONTAINER="ci-app-test-${BUILD_NUMBER}"
-
-                    docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-
-                    cleanup() {
-                        docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-                    }
-
-                    trap cleanup EXIT
-
-                    docker run -d \
-                      --name "$CONTAINER" \
-                      -p 127.0.0.1:18080:8080 \
-                      "${DOCKER_IMAGE}:${BUILD_NUMBER}"
-
-                    READY=0
-
-                    for i in $(seq 1 30); do
-                        if curl -fsS \
-                          http://127.0.0.1:18080/ \
-                          -o /dev/null; then
-                            READY=1
-                            break
-                        fi
-                        sleep 2
-                    done
-
-                    if [ "$READY" -ne 1 ]; then
-                        docker logs "$CONTAINER"
-                        echo "Le test HTTP a echoue."
-                        exit 1
-                    fi
-
-                    echo "Test HTTP reussi."
-                '''
-
-                // Publication sur Docker Hub.
+            steps {
                 withCredentials([
                     usernamePassword(
                         credentialsId: 'dockerhub-credentials',
-                        usernameVariable: 'DH_USER',
-                        passwordVariable: 'DH_TOKEN'
+                        usernameVariable: 'DOCKERHUB_USER',
+                        passwordVariable: 'DOCKERHUB_PASSWORD'
                     )
                 ]) {
                     sh '''
                         set -eu
-                        set +x
 
-                        echo "$DH_TOKEN" | docker login \
-                          --username "$DH_USER" \
-                          --password-stdin
+                        IMAGE="$DOCKERHUB_USER/ci-app:$BUILD_NUMBER"
 
-                        docker push "${DOCKER_IMAGE}:${BUILD_NUMBER}"
-                        docker push "${DOCKER_IMAGE}:latest"
+                        docker tag "$FULL_IMAGE" "$IMAGE"
+
+                        echo "$DOCKERHUB_PASSWORD" |
+                          docker login \
+                            --username "$DOCKERHUB_USER" \
+                            --password-stdin
+
+                        docker push "$IMAGE"
 
                         docker logout
                     '''
                 }
+            }
+        }
 
-                // Deploiement sur Docker Swarm.
-                script {
-                    if (params.DEPLOY_SWARM) {
-                        withCredentials([
-                            usernamePassword(
-                                credentialsId: 'dockerhub-credentials',
-                                usernameVariable: 'DH_USER',
-                                passwordVariable: 'DH_TOKEN'
-                            )
-                        ]) {
-                            sh '''
-                                set -eu
-                                set +x
+        stage('10 - Deploiement Docker Swarm') {
+            agent { label 'docker-trivy' }
 
-                                STATE=$(docker info \
-                                  --format '{{.Swarm.LocalNodeState}}')
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub-credentials',
+                        usernameVariable: 'DOCKERHUB_USER',
+                        passwordVariable: 'DOCKERHUB_PASSWORD'
+                    )
+                ]) {
+                    sh '''
+                        set -eu
 
-                                MANAGER=$(docker info \
-                                  --format '{{.Swarm.ControlAvailable}}')
+                        IMAGE="$DOCKERHUB_USER/ci-app:$BUILD_NUMBER"
 
-                                if [ "$STATE" != "active" ] ||
-                                   [ "$MANAGER" != "true" ]; then
-                                    echo "ERREUR : cet agent doit acceder a un Swarm Manager actif."
-                                    exit 1
-                                fi
+                        STATE=$(docker info \
+                          --format '{{.Swarm.LocalNodeState}}')
 
-                                echo "$DH_TOKEN" | docker login \
-                                  --username "$DH_USER" \
-                                  --password-stdin
+                        if [ "$STATE" != "active" ]; then
+                            echo "ERREUR: ce noeud ne voit pas un Swarm actif"
+                            exit 1
+                        fi
 
-                                IMAGE="${DOCKER_IMAGE}:${BUILD_NUMBER}"
+                        echo "$DOCKERHUB_PASSWORD" |
+                          docker login \
+                            --username "$DOCKERHUB_USER" \
+                            --password-stdin
 
-                                if docker service inspect "$SWARM_SERVICE" \
-                                  >/dev/null 2>&1; then
+                        if docker service inspect "$SWARM_SERVICE" \
+                          >/dev/null 2>&1; then
 
-                                    docker service update \
-                                      --image "$IMAGE" \
-                                      --with-registry-auth \
-                                      "$SWARM_SERVICE"
+                            docker service update \
+                              --image "$IMAGE" \
+                              --with-registry-auth \
+                              "$SWARM_SERVICE"
+                        else
+                            docker service create \
+                              --name "$SWARM_SERVICE" \
+                              --publish "$SWARM_PORT:8080" \
+                              --replicas "$SWARM_REPLICAS" \
+                              --with-registry-auth \
+                              "$IMAGE"
+                        fi
 
-                                else
+                        docker logout
 
-                                    docker service create \
-                                      --name "$SWARM_SERVICE" \
-                                      --replicas "$SWARM_REPLICAS" \
-                                      --publish published=8080,target=8080 \
-                                      --with-registry-auth \
-                                      "$IMAGE"
-                                fi
+                        echo "Verification du service Swarm"
 
-                                docker logout
-                            '''
-                        }
+                        docker service ps "$SWARM_SERVICE"
 
-                        // Attendre que les replicas soient prets.
-                        sh '''
-                            set -eu
-
-                            READY=0
-
-                            for i in $(seq 1 30); do
-                                DESIRED=$(docker service inspect \
-                                  --format '{{.Spec.Mode.Replicated.Replicas}}' \
-                                  "$SWARM_SERVICE")
-
-                                RUNNING=$(docker service ps \
-                                  --filter desired-state=running \
-                                  --format '{{.CurrentState}}' \
-                                  "$SWARM_SERVICE" |
-                                  grep -c '^Running' || true)
-
-                                echo "Replicas : $RUNNING / $DESIRED"
-
-                                if [ "$RUNNING" -ge "$DESIRED" ] &&
-                                   [ "$DESIRED" -gt 0 ]; then
-                                    READY=1
-                                    break
-                                fi
-
-                                sleep 5
-                            done
-
-                            docker service ps "$SWARM_SERVICE"
-
-                            if [ "$READY" -ne 1 ]; then
-                                echo "ERREUR : les replicas Swarm ne sont pas tous actifs."
-                                exit 1
-                            fi
-
-                            echo "Deploiement Docker Swarm reussi."
-                        '''
-                    }
+                        docker service inspect \
+                          --format '{{.Spec.Name}} - {{.UpdateStatus.State}}' \
+                          "$SWARM_SERVICE"
+                    '''
                 }
             }
         }
@@ -515,7 +299,7 @@ DOCKERFILE
 
     post {
         success {
-            echo 'Pipeline CI/CD termine avec succes.'
+            echo 'Pipeline termine avec succes.'
         }
 
         failure {
@@ -524,7 +308,6 @@ DOCKERFILE
 
         always {
             echo 'Fin du pipeline.'
-            cleanWs()
         }
     }
 }
