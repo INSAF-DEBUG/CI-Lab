@@ -16,7 +16,6 @@ pipeline {
             defaultValue: false,
             description: 'Activer SonarQube et le Quality Gate'
         )
-
         booleanParam(
             name: 'ENABLE_JMETER',
             defaultValue: false,
@@ -34,7 +33,6 @@ pipeline {
 
         DOCKERHUB_USER = 'insafnemri'
         DOCKER_IMAGE = 'insafnemri/ci-app'
-
         WAR_FILE = 'ci-app/target/ci-app-1.0-SNAPSHOT.war'
     }
 
@@ -196,7 +194,7 @@ pipeline {
                     command -v jmeter
 
                     if [ ! -f tests/jmeter/ci-app.jmx ]; then
-                        echo "ERREUR : tests/jmeter/ci-app.jmx est introuvable."
+                        echo "ERREUR : tests/jmeter/ci-app.jmx introuvable."
                         exit 1
                     fi
 
@@ -241,13 +239,13 @@ pipeline {
             }
 
             steps {
-                // Telecharger le WAR depuis Nexus
                 sh '''
                     set -eu
 
                     echo "=== Verification des outils ==="
                     command -v curl
-                    command -v python3
+                    command -v grep
+                    command -v sed
                     docker --version
                     trivy --version
 
@@ -263,25 +261,20 @@ pipeline {
                       --data-urlencode "maven.extension=war" \
                       -o /tmp/nexus-assets.json
 
-                    DOWNLOAD_URL=$(python3 -c '
-import json
-with open("/tmp/nexus-assets.json") as f:
-    data = json.load(f)
+                    grep -oE '"downloadUrl"[[:space:]]*:[[:space:]]*"[^"]+\\.war"' \
+                      /tmp/nexus-assets.json |
+                      sed -E 's/^"downloadUrl"[[:space:]]*:[[:space:]]*"([^"]+)"$/\\1/' \
+                      > /tmp/nexus-war-urls.txt
 
-items = [
-    item["downloadUrl"]
-    for item in data.get("items", [])
-    if item.get("downloadUrl", "").endswith(".war")
-]
+                    WAR_COUNT=$(wc -l < /tmp/nexus-war-urls.txt | tr -d ' ')
 
-if len(items) != 1:
-    raise SystemExit(
-        "Erreur : un seul WAR attendu, nombre trouve : "
-        + str(len(items))
-    )
+                    if [ "$WAR_COUNT" -ne 1 ]; then
+                        echo "ERREUR : un seul WAR attendu, nombre trouve : $WAR_COUNT"
+                        cat /tmp/nexus-war-urls.txt
+                        exit 1
+                    fi
 
-print(items[0])
-')
+                    DOWNLOAD_URL=$(cat /tmp/nexus-war-urls.txt)
 
                     echo "=== Telechargement du WAR ==="
 
@@ -293,7 +286,6 @@ print(items[0])
                     ls -lh "$WAR_FILE"
                 '''
 
-                // Construire l'image a partir du WAR telecharge
                 sh '''
                     set -eu
 
@@ -319,7 +311,6 @@ EOF
                       .
                 '''
 
-                // Scanner l'image avec Trivy
                 sh '''
                     set -eu
 
@@ -332,7 +323,6 @@ EOF
                       "$DOCKER_IMAGE:$BUILD_NUMBER"
                 '''
 
-                // Publier sur Docker Hub seulement si le scan reussit
                 withCredentials([
                     string(
                         credentialsId: 'DOCKERHUB_TOKEN',
@@ -367,12 +357,109 @@ EOF
                                 fi
 
                                 attempt=$((attempt + 1))
-                                echo "Nouvelle tentative dans 15 secondes..."
                                 sleep 15
                             done
                         done
 
                         docker logout
+                    '''
+                }
+            }
+        }
+
+        stage('11 - Deploiement Docker Swarm') {
+            agent {
+                label 'docker-swarm'
+            }
+
+            steps {
+                withCredentials([
+                    string(
+                        credentialsId: 'DOCKERHUB_TOKEN',
+                        variable: 'DOCKERHUB_TOKEN'
+                    )
+                ]) {
+                    sh '''
+                        set -eu
+
+                        echo "=== Verification Docker Swarm ==="
+
+                        docker --version
+                        docker info
+
+                        STATE=$(docker info --format '{{.Swarm.LocalNodeState}}')
+                        MANAGER=$(docker info --format '{{.Swarm.ControlAvailable}}')
+
+                        if [ "$STATE" != "active" ]; then
+                            echo "ERREUR : le noeud n'appartient pas a un Swarm actif."
+                            exit 1
+                        fi
+
+                        if [ "$MANAGER" != "true" ]; then
+                            echo "ERREUR : cet agent doit pouvoir administrer le manager Swarm."
+                            exit 1
+                        fi
+
+                        echo "=== Connexion Docker Hub ==="
+
+                        echo "$DOCKERHUB_TOKEN" |
+                          docker login \
+                            -u "$DOCKERHUB_USER" \
+                            --password-stdin
+
+                        echo "=== Recuperation de l'image ==="
+
+                        docker pull "$DOCKER_IMAGE:$BUILD_NUMBER"
+
+                        echo "=== Deploiement du service ==="
+
+                        if docker service inspect ci-app >/dev/null 2>&1; then
+                            docker service update \
+                              --image "$DOCKER_IMAGE:$BUILD_NUMBER" \
+                              --replicas 2 \
+                              --with-registry-auth \
+                              ci-app
+                        else
+                            docker service create \
+                              --name ci-app \
+                              --replicas 2 \
+                              --publish published=8080,target=8080 \
+                              --with-registry-auth \
+                              "$DOCKER_IMAGE:$BUILD_NUMBER"
+                        fi
+
+                        echo "=== Attente de la stabilisation ==="
+
+                        ATTEMPT=0
+                        MAX_ATTEMPTS=30
+
+                        while [ "$ATTEMPT" -lt "$MAX_ATTEMPTS" ]; do
+                            RUNNING=$(docker service ps \
+                              --filter desired-state=running \
+                              --format '{{.CurrentState}}' \
+                              ci-app |
+                              grep -c '^Running' || true)
+
+                            if [ "$RUNNING" -ge 2 ]; then
+                                echo "Les deux replicas sont en cours d'execution."
+                                break
+                            fi
+
+                            ATTEMPT=$((ATTEMPT + 1))
+                            sleep 5
+                        done
+
+                        docker service ls
+                        docker service ps ci-app
+
+                        if [ "$ATTEMPT" -ge "$MAX_ATTEMPTS" ]; then
+                            echo "ERREUR : les replicas ne sont pas tous Running."
+                            exit 1
+                        fi
+
+                        docker logout
+
+                        echo "=== Deploiement Swarm termine ==="
                     '''
                 }
             }
