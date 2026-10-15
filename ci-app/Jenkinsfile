@@ -24,7 +24,6 @@ pipeline {
     }
 
     environment {
-        APP_DIR = 'ci-app'
         APP_NAME = 'ci-app'
         APP_VERSION = '1.0-SNAPSHOT'
 
@@ -45,12 +44,7 @@ pipeline {
 
                 sh '''
                     set -eu
-
-                    echo "=== Depot Git ==="
                     git log -1 --oneline
-
-                    echo "=== Application ==="
-                    ls -la ci-app
                     test -f ci-app/pom.xml
                 '''
             }
@@ -60,14 +54,8 @@ pipeline {
             steps {
                 sh '''
                     set -eu
-
-                    echo "=== Java ==="
                     java -version
-
-                    echo "=== Maven ==="
                     mvn -version
-
-                    echo "=== Outils ==="
                     command -v git
                     command -v mvn
                 '''
@@ -96,7 +84,6 @@ pipeline {
                 dir('ci-app') {
                     sh '''
                         set -eu
-
                         export MOZ_HEADLESS=1
 
                         mvn -B \
@@ -105,6 +92,7 @@ pipeline {
                           org.jacoco:jacoco-maven-plugin:0.8.12:report
 
                         test -f target/site/jacoco/index.html
+                        test -f target/site/jacoco/jacoco.xml
                     '''
                 }
             }
@@ -154,9 +142,7 @@ pipeline {
 
             steps {
                 timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate(
-                        abortPipeline: true
-                    )
+                    waitForQualityGate(abortPipeline: true)
                 }
             }
         }
@@ -174,15 +160,12 @@ pipeline {
                         sh '''
                             set -eu
 
-                            echo "=== Verification de Nexus ==="
-
                             curl -fsS \
                               --connect-timeout 10 \
                               --user "$NEXUS_USER:$NEXUS_PASSWORD" \
                               "$NEXUS_URL/" \
                               -o /dev/null
 
-                            echo "=== Publication Maven ==="
                             mvn -B deploy -DskipTests
                         '''
                     }
@@ -202,11 +185,7 @@ pipeline {
                     set -eu
 
                     command -v jmeter
-
-                    if [ ! -f tests/jmeter/ci-app.jmx ]; then
-                        echo "ERREUR : tests/jmeter/ci-app.jmx introuvable."
-                        exit 1
-                    fi
+                    test -f tests/jmeter/ci-app.jmx
 
                     mkdir -p reports/jmeter
 
@@ -249,256 +228,10 @@ pipeline {
             }
 
             steps {
-                sh '''
-                    set -eu
-
-                    echo "=== Verification des outils ==="
-                    command -v curl
-                    command -v jq
-                    command -v grep
-                    docker --version
-                    trivy --version
-
-                    mkdir -p ci-app/target
-                '''
-
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'nexus-credentials',
-                        usernameVariable: 'NEXUS_USER',
-                        passwordVariable: 'NEXUS_PASSWORD'
-                    )
-                ]) {
-                    sh '''
-                        set -eu
-
-                        echo "=== Recherche du WAR dans Nexus ==="
-
-                        curl -fsS \
-                          --connect-timeout 10 \
-                          --user "$NEXUS_USER:$NEXUS_PASSWORD" \
-                          --get "$NEXUS_URL/service/rest/v1/search/assets" \
-                          --data-urlencode "repository=$NEXUS_REPO" \
-                          --data-urlencode "maven.artifactId=$APP_NAME" \
-                          --data-urlencode "maven.baseVersion=$APP_VERSION" \
-                          --data-urlencode "maven.extension=war" \
-                          -o /tmp/nexus-assets.json
-
-                        echo "=== Reponse de Nexus ==="
-                        jq '{items: [.items[]? | {path, downloadUrl}]}' \
-                          /tmp/nexus-assets.json
-
-                        echo "=== Extraction de l'URL du WAR ==="
-
-                        jq -r '
-                          .items[]?
-                          | select(
-                              (.path // "") | endswith(".war")
-                            )
-                          | .downloadUrl // empty
-                        ' /tmp/nexus-assets.json \
-                          > /tmp/nexus-war-urls.txt
-
-                        WAR_COUNT=$(grep -c . /tmp/nexus-war-urls.txt || true)
-
-                        if [ "$WAR_COUNT" -ne 1 ]; then
-                            echo "ERREUR : un seul WAR attendu, nombre trouve : $WAR_COUNT"
-                            echo "Reponse JSON complete :"
-                            cat /tmp/nexus-assets.json
-                            exit 1
-                        fi
-
-                        DOWNLOAD_URL=$(cat /tmp/nexus-war-urls.txt)
-
-                        echo "=== Telechargement du WAR ==="
-
-                        curl -fSL \
-                          --connect-timeout 10 \
-                          --user "$NEXUS_USER:$NEXUS_PASSWORD" \
-                          "$DOWNLOAD_URL" \
-                          -o "$WAR_FILE"
-
-                        test -s "$WAR_FILE"
-                        ls -lh "$WAR_FILE"
-                    '''
-                }
-
-                sh '''
-                    set -eu
-
-                    cat > Dockerfile <<'EOF'
-FROM tomcat:9.0-jdk21-temurin-noble
-
-LABEL maintainer="Insaf Nemri"
-LABEL application="ci-app"
-
-COPY ci-app/target/ci-app-1.0-SNAPSHOT.war \
-     /usr/local/tomcat/webapps/ci-app.war
-
-EXPOSE 8080
-
-CMD ["catalina.sh", "run"]
-EOF
-
-                    echo "=== Construction de l'image ==="
-
-                    docker build \
-                      -t "$DOCKER_IMAGE:$BUILD_NUMBER" \
-                      -t "$DOCKER_IMAGE:latest" \
-                      .
-                '''
-
-                sh '''
-                    set -eu
-
-                    echo "=== Scan de securite Trivy ==="
-
-                    trivy image \
-                      --severity HIGH,CRITICAL \
-                      --ignore-unfixed \
-                      --exit-code 1 \
-                      "$DOCKER_IMAGE:$BUILD_NUMBER"
-                '''
-
-                withCredentials([
-                    string(
-                        credentialsId: 'DOCKERHUB_TOKEN',
-                        variable: 'DOCKERHUB_TOKEN'
-                    )
-                ]) {
-                    sh '''
-                        set -eu
-
-                        echo "=== Connexion Docker Hub ==="
-
-                        echo "$DOCKERHUB_TOKEN" |
-                          docker login \
-                            -u "$DOCKERHUB_USER" \
-                            --password-stdin
-
-                        for tag in "$BUILD_NUMBER" latest; do
-                            attempt=1
-
-                            while true; do
-                                echo "Publication de $DOCKER_IMAGE:$tag - tentative $attempt/3"
-
-                                if docker push "$DOCKER_IMAGE:$tag"; then
-                                    echo "Publication reussie : $DOCKER_IMAGE:$tag"
-                                    break
-                                fi
-
-                                if [ "$attempt" -ge 3 ]; then
-                                    echo "ERREUR : publication impossible apres 3 tentatives."
-                                    docker logout || true
-                                    exit 1
-                                fi
-
-                                attempt=$((attempt + 1))
-                                sleep 15
-                            done
-                        done
-
-                        docker logout
-                    '''
-                }
-            }
-        }
-
-        stage('11 - Deploiement Docker Swarm') {
-            agent {
-                label 'docker-swarm'
-            }
-
-            steps {
-                withCredentials([
-                    string(
-                        credentialsId: 'DOCKERHUB_TOKEN',
-                        variable: 'DOCKERHUB_TOKEN'
-                    )
-                ]) {
-                    sh '''
-                        set -eu
-
-                        echo "=== Verification Docker Swarm ==="
-
-                        docker --version
-                        docker info
-
-                        STATE=$(docker info --format '{{.Swarm.LocalNodeState}}')
-                        MANAGER=$(docker info --format '{{.Swarm.ControlAvailable}}')
-
-                        if [ "$STATE" != "active" ]; then
-                            echo "ERREUR : le noeud n'appartient pas a un Swarm actif."
-                            exit 1
-                        fi
-
-                        if [ "$MANAGER" != "true" ]; then
-                            echo "ERREUR : cet agent doit pouvoir administrer le manager Swarm."
-                            exit 1
-                        fi
-
-                        echo "=== Connexion Docker Hub ==="
-
-                        echo "$DOCKERHUB_TOKEN" |
-                          docker login \
-                            -u "$DOCKERHUB_USER" \
-                            --password-stdin
-
-                        echo "=== Recuperation de l'image ==="
-
-                        docker pull "$DOCKER_IMAGE:$BUILD_NUMBER"
-
-                        echo "=== Deploiement du service ==="
-
-                        if docker service inspect ci-app >/dev/null 2>&1; then
-                            docker service update \
-                              --image "$DOCKER_IMAGE:$BUILD_NUMBER" \
-                              --replicas 2 \
-                              --with-registry-auth \
-                              ci-app
-                        else
-                            docker service create \
-                              --name ci-app \
-                              --replicas 2 \
-                              --publish published=8080,target=8080 \
-                              --with-registry-auth \
-                              "$DOCKER_IMAGE:$BUILD_NUMBER"
-                        fi
-
-                        echo "=== Attente de la stabilisation ==="
-
-                        ATTEMPT=0
-                        MAX_ATTEMPTS=30
-
-                        while [ "$ATTEMPT" -lt "$MAX_ATTEMPTS" ]; do
-                            RUNNING=$(docker service ps \
-                              --filter desired-state=running \
-                              --format '{{.CurrentState}}' \
-                              ci-app |
-                              grep -c '^Running' || true)
-
-                            if [ "$RUNNING" -ge 2 ]; then
-                                echo "Les deux replicas sont en cours d'execution."
-                                break
-                            fi
-
-                            ATTEMPT=$((ATTEMPT + 1))
-                            sleep 5
-                        done
-
-                        docker service ls
-                        docker service ps ci-app
-
-                        if [ "$ATTEMPT" -ge "$MAX_ATTEMPTS" ]; then
-                            echo "ERREUR : les replicas ne sont pas tous Running."
-                            docker logout || true
-                            exit 1
-                        fi
-
-                        docker logout
-
-                        echo "=== Deploiement Swarm termine ==="
-                    '''
+                // Transfert du WAR produit sur centos-build vers cet agent.
+                // stash/unstash fonctionne entre agents Jenkins.
+                script {
+                    unstash 'ci-app-war'
                 }
             }
         }
