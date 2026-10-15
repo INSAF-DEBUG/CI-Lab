@@ -260,6 +260,7 @@ pipeline {
 )]) {
     sh '''
         set -eu
+                echo "=== Recherche du WAR dans Nexus ==="
 
         curl -fsS \
           --user "$NEXUS_USER:$NEXUS_PASSWORD" \
