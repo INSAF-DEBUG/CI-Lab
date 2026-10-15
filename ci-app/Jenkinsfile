@@ -9,14 +9,13 @@ pipeline {
     }
 
     environment {
-        GIT_URL      = 'https://github.com/INSAF-DEBUG/CI-Lab.git'
-        NEXUS_URL    = 'http://192.168.42.128:8081'
-        NEXUS_REPO   = 'maven-snapshots'
-        WAR_PATH     = 'com/insaf/cilab/ci-app/1.0-SNAPSHOT/ci-app-1.0-SNAPSHOT.war'
-
-        DOCKER_IMAGE = 'insafnemri/ci-app'
-        DOCKER_TAG   = "${BUILD_NUMBER}"
-        WAR_FILE     = 'ci-app-1.0-SNAPSHOT.war'
+        GIT_URL       = 'https://github.com/INSAF-DEBUG/CI-Lab.git'
+        NEXUS_URL     = 'http://192.168.42.128:8081'
+        NEXUS_REPO    = 'maven-snapshots'
+        GROUP_PATH    = 'com/insaf/cilab/ci-app'
+        WAR_FILE      = 'ci-app-1.0-SNAPSHOT.war'
+        DOCKER_IMAGE  = 'insafnemri/ci-app'
+        DOCKER_TAG    = "${BUILD_NUMBER}"
     }
 
     stages {
@@ -32,23 +31,19 @@ pipeline {
 
                     git --version
                     git config --global http.version HTTP/1.1
-
                     git init .
                     git remote add origin "$GIT_URL"
                     git config core.compression 0
 
                     attempt=1
-
                     until git -c http.version=HTTP/1.1 fetch \
                         --no-tags origin \
                         +refs/heads/main:refs/remotes/origin/main
                     do
                         if [ "$attempt" -ge 3 ]; then
-                            echo "ERREUR : impossible de recuperer le depot Git."
+                            echo "ERREUR : echec du checkout Git"
                             exit 1
                         fi
-
-                        echo "Nouvelle tentative Git..."
                         attempt=$((attempt + 1))
                         sleep 3
                     done
@@ -56,14 +51,16 @@ pipeline {
                     git checkout -B main refs/remotes/origin/main
 
                     test -f ci-app/pom.xml
-                    test -f Dockerfile
+
+                    echo "Fichiers du projet :"
+                    find ci-app -maxdepth 2 -type f | head -40
 
                     git log -1 --oneline
                 '''
 
                 stash(
                     name: 'source-code',
-                    includes: 'ci-app/**,Dockerfile',
+                    includes: 'ci-app/**',
                     useDefaultExcludes: false
                 )
             }
@@ -77,7 +74,6 @@ pipeline {
                     set -eu
                     java -version
                     mvn -version
-                    git --version
                 '''
             }
         }
@@ -94,6 +90,7 @@ pipeline {
                         set -eu
                         mvn -B clean package -DskipTests
                         test -s target/ci-app-1.0-SNAPSHOT.war
+                        ls -lh target/ci-app-1.0-SNAPSHOT.war
                     '''
 
                     archiveArtifacts(
@@ -103,7 +100,7 @@ pipeline {
                 }
 
                 stash(
-                    name: 'war-artifact',
+                    name: 'built-war',
                     includes: 'ci-app/target/ci-app-1.0-SNAPSHOT.war'
                 )
             }
@@ -115,7 +112,6 @@ pipeline {
             steps {
                 deleteDir()
                 unstash 'source-code'
-                unstash 'war-artifact'
 
                 dir('ci-app') {
                     sh '''
@@ -126,9 +122,6 @@ pipeline {
                           org.jacoco:jacoco-maven-plugin:0.8.12:prepare-agent \
                           test \
                           org.jacoco:jacoco-maven-plugin:0.8.12:report
-
-                        test -f target/site/jacoco/index.html
-                        test -f target/site/jacoco/jacoco.xml
                     '''
                 }
             }
@@ -148,13 +141,13 @@ pipeline {
             }
         }
 
-        stage('5 - Publication Maven vers Nexus') {
+        stage('5 - Publication du WAR dans Nexus') {
             agent { label 'centos-build' }
 
             steps {
                 deleteDir()
                 unstash 'source-code'
-                unstash 'war-artifact'
+                unstash 'built-war'
 
                 dir('ci-app') {
                     withCredentials([
@@ -167,20 +160,37 @@ pipeline {
                         sh '''
                             set -eu
 
-                            curl -fsS \
-                              --connect-timeout 10 \
-                              -u "$NEXUS_USER:$NEXUS_PASSWORD" \
-                              "$NEXUS_URL/" \
-                              -o /dev/null
+                            SETTINGS="$WORKSPACE/nexus-settings.xml"
 
-                            mvn -B deploy -DskipTests
+                            cat > "$SETTINGS" <<EOF
+<settings>
+  <servers>
+    <server>
+      <id>jenkins-nexus</id>
+      <username>${NEXUS_USER}</username>
+      <password>${NEXUS_PASSWORD}</password>
+    </server>
+  </servers>
+</settings>
+EOF
+
+                            mvn -B \
+                              -s "$SETTINGS" \
+                              org.apache.maven.plugins:maven-deploy-plugin:2.8.2:deploy-file \
+                              -Dfile=target/ci-app-1.0-SNAPSHOT.war \
+                              -DpomFile=pom.xml \
+                              -DrepositoryId=jenkins-nexus \
+                              -Durl="$NEXUS_URL/repository/$NEXUS_REPO/" \
+                              -DretryFailedDeploymentCount=3
+
+                            rm -f "$SETTINGS"
                         '''
                     }
                 }
             }
         }
 
-        stage('6 - Telechargement WAR depuis Nexus') {
+        stage('6 - Recuperation du WAR depuis Nexus') {
             agent { label 'centos-build' }
 
             steps {
@@ -198,11 +208,45 @@ pipeline {
 
                         mkdir -p docker-context
 
-                        curl -fSL \
-                          --connect-timeout 10 \
+                        BASE_URL="$NEXUS_URL/repository/$NEXUS_REPO/$GROUP_PATH/1.0-SNAPSHOT"
+                        META_FILE="$WORKSPACE/maven-metadata.xml"
+
+                        curl -fsSL \
                           --retry 3 \
                           -u "$NEXUS_USER:$NEXUS_PASSWORD" \
-                          "$NEXUS_URL/repository/$NEXUS_REPO/$WAR_PATH" \
+                          "$BASE_URL/maven-metadata.xml" \
+                          -o "$META_FILE"
+
+                        SNAPSHOT_VALUE=$(awk '
+                            /<snapshotVersion>/ { block=1; ext=0; value="" }
+                            block && /<extension>war<\\/extension>/ { ext=1 }
+                            block && /<value>/ {
+                                gsub(/.*<value>/, "")
+                                gsub(/<\\/value>.*/, "")
+                                value=$0
+                            }
+                            block && /<\\/snapshotVersion>/ {
+                                if (ext && value != "") {
+                                    print value
+                                    exit
+                                }
+                                block=0
+                            }
+                        ' "$META_FILE")
+
+                        if [ -n "$SNAPSHOT_VALUE" ]; then
+                            ARTIFACT_URL="$BASE_URL/ci-app-$SNAPSHOT_VALUE.war"
+                        else
+                            ARTIFACT_URL="$BASE_URL/ci-app-1.0-SNAPSHOT.war"
+                        fi
+
+                        echo "Telechargement du WAR depuis Nexus"
+                        echo "$ARTIFACT_URL"
+
+                        curl -fSL \
+                          --retry 3 \
+                          -u "$NEXUS_USER:$NEXUS_PASSWORD" \
+                          "$ARTIFACT_URL" \
                           -o "docker-context/$WAR_FILE"
 
                         test -s "docker-context/$WAR_FILE"
@@ -211,28 +255,33 @@ pipeline {
                 }
 
                 stash(
-                    name: 'docker-war',
+                    name: 'nexus-war',
                     includes: 'docker-context/ci-app-1.0-SNAPSHOT.war'
                 )
             }
         }
 
-        stage('7 - Build image Docker') {
+        stage('7 - Construction de l image Docker') {
             agent { label 'docker-trivy' }
 
             steps {
                 deleteDir()
-                unstash 'source-code'
-                unstash 'docker-war'
+                unstash 'nexus-war'
 
                 sh '''
                     set -eu
 
                     command -v docker
-                    test -f Dockerfile
-                    test -s "docker-context/$WAR_FILE"
 
                     cp "docker-context/$WAR_FILE" "$WAR_FILE"
+
+                    cat > Dockerfile <<'EOF'
+FROM tomcat:9.0-jdk8-temurin
+RUN rm -rf /usr/local/tomcat/webapps/*
+COPY ci-app-1.0-SNAPSHOT.war /usr/local/tomcat/webapps/ROOT.war
+EXPOSE 8080
+CMD ["catalina.sh", "run"]
+EOF
 
                     docker build \
                       -f Dockerfile \
@@ -245,14 +294,12 @@ pipeline {
             }
         }
 
-        stage('8 - Scan securite Trivy') {
+        stage('8 - Analyse de securite Trivy') {
             agent { label 'docker-trivy' }
 
             steps {
                 sh '''
                     set -eu
-
-                    command -v trivy
 
                     trivy image \
                       --exit-code 1 \
@@ -262,7 +309,7 @@ pipeline {
             }
         }
 
-        stage('9 - Push Docker Hub') {
+        stage('9 - Publication Docker Hub') {
             agent { label 'docker-trivy' }
 
             steps {
@@ -278,7 +325,7 @@ pipeline {
 
                         echo "$DOCKERHUB_PASSWORD" |
                           docker login \
-                            -u "$DOCKERHUB_USER" \
+                            --username "$DOCKERHUB_USER" \
                             --password-stdin
 
                         docker push "$DOCKER_IMAGE:$DOCKER_TAG"
@@ -306,7 +353,7 @@ pipeline {
 
                         echo "$DOCKERHUB_PASSWORD" |
                           docker login \
-                            -u "$DOCKERHUB_USER" \
+                            --username "$DOCKERHUB_USER" \
                             --password-stdin
 
                         docker pull "$DOCKER_IMAGE:$DOCKER_TAG"
@@ -336,11 +383,11 @@ pipeline {
 
     post {
         success {
-            echo 'Pipeline termine avec succes.'
+            echo 'Pipeline execute avec succes.'
         }
 
         failure {
-            echo 'Pipeline en echec. Consulter la Console Output.'
+            echo 'Pipeline en echec. Consulter la premiere erreur dans Console Output.'
         }
 
         always {
