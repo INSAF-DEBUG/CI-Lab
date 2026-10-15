@@ -20,6 +20,7 @@ pipeline {
     }
 
     stages {
+
         stage('1 - Checkout Git') {
             agent { label 'centos-build' }
 
@@ -131,43 +132,55 @@ pipeline {
         }
 
         stage('6 - Telechargement WAR et Dockerfile') {
-            agent { label 'docker-trivy' }
+            agent { label 'centos-build' }
 
             steps {
                 deleteDir()
                 checkout scm
 
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'nexus-credentials',
-                        usernameVariable: 'NEXUS_USER',
-                        passwordVariable: 'NEXUS_PASSWORD'
+                dir('ci-app') {
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'nexus-credentials',
+                            usernameVariable: 'NEXUS_USER',
+                            passwordVariable: 'NEXUS_PASSWORD'
+                        )
+                    ]) {
+                        sh '''
+                            set -eu
+
+                            mkdir -p deploy
+
+                            echo "Telechargement du WAR depuis Nexus"
+
+                            curl -fSL --retry 3 \
+                              --connect-timeout 10 \
+                              -u "$NEXUS_USER:$NEXUS_PASSWORD" \
+                              "$NEXUS_URL/repository/$NEXUS_REPO/$NEXUS_GROUP_PATH/$WAR_NAME" \
+                              -o deploy/ci-app.war
+
+                            test -s deploy/ci-app.war
+
+                            echo "WAR telecharge avec succes"
+                            ls -lh deploy/ci-app.war
+                        '''
+                    }
+
+                    stash(
+                        name: 'application-files',
+                        includes: 'deploy/ci-app.war'
                     )
-                ]) {
-                    sh '''
-                        set -eu
-
-                        command -v curl
-                        command -v docker
-                        command -v trivy
-
-                        mkdir -p deploy
-
-                        echo "Telechargement du WAR depuis Nexus"
-
-                        curl -fSL --retry 3 \
-                          --connect-timeout 10 \
-                          -u "$NEXUS_USER:$NEXUS_PASSWORD" \
-                          "$NEXUS_URL/repository/$NEXUS_REPO/$NEXUS_GROUP_PATH/$WAR_NAME" \
-                          -o deploy/ci-app.war
-
-                        test -s deploy/ci-app.war
-                        test -f Dockerfile
-
-                        echo "WAR telecharge avec succes"
-                        ls -lh deploy/ci-app.war
-                    '''
                 }
+
+                sh '''
+                    set -eu
+                    test -f Dockerfile
+                '''
+
+                stash(
+                    name: 'dockerfile-source',
+                    includes: 'Dockerfile'
+                )
             }
         }
 
@@ -175,6 +188,11 @@ pipeline {
             agent { label 'docker-trivy' }
 
             steps {
+                deleteDir()
+
+                unstash 'application-files'
+                unstash 'dockerfile-source'
+
                 script {
                     env.FULL_IMAGE =
                         "${env.DOCKERHUB_USER ?: 'DOCKERHUB_USERNAME'}/${env.DOCKER_IMAGE}:${env.BUILD_NUMBER}"
@@ -182,6 +200,10 @@ pipeline {
 
                 sh '''
                     set -eu
+
+                    command -v docker
+                    test -s ci-app/deploy/ci-app.war
+                    test -f Dockerfile
 
                     docker build \
                       --pull \
@@ -197,6 +219,8 @@ pipeline {
             steps {
                 sh '''
                     set -eu
+
+                    command -v trivy
 
                     trivy image \
                       --severity HIGH,CRITICAL \
@@ -220,7 +244,7 @@ pipeline {
                     sh '''
                         set -eu
 
-                        IMAGE="$DOCKERHUB_USER/ci-app:$BUILD_NUMBER"
+                        IMAGE="$DOCKERHUB_USER/$DOCKER_IMAGE:$BUILD_NUMBER"
 
                         docker tag "$FULL_IMAGE" "$IMAGE"
 
@@ -251,13 +275,13 @@ pipeline {
                     sh '''
                         set -eu
 
-                        IMAGE="$DOCKERHUB_USER/ci-app:$BUILD_NUMBER"
+                        IMAGE="$DOCKERHUB_USER/$DOCKER_IMAGE:$BUILD_NUMBER"
 
                         STATE=$(docker info \
                           --format '{{.Swarm.LocalNodeState}}')
 
                         if [ "$STATE" != "active" ]; then
-                            echo "ERREUR: ce noeud ne voit pas un Swarm actif"
+                            echo "ERREUR : Docker Swarm n'est pas actif"
                             exit 1
                         fi
 
@@ -272,6 +296,7 @@ pipeline {
                             docker service update \
                               --image "$IMAGE" \
                               --with-registry-auth \
+                              --replicas "$SWARM_REPLICAS" \
                               "$SWARM_SERVICE"
                         else
                             docker service create \
@@ -284,12 +309,10 @@ pipeline {
 
                         docker logout
 
-                        echo "Verification du service Swarm"
-
                         docker service ps "$SWARM_SERVICE"
 
                         docker service inspect \
-                          --format '{{.Spec.Name}} - {{.UpdateStatus.State}}' \
+                          --format '{{.Spec.Name}}' \
                           "$SWARM_SERVICE"
                     '''
                 }
