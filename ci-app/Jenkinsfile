@@ -68,6 +68,7 @@ pipeline {
                     sh '''
                         set -eu
                         mvn -B clean package -DskipTests
+                        test -s target/ci-app-1.0-SNAPSHOT.war
                     '''
                 }
 
@@ -76,6 +77,13 @@ pipeline {
                     test -s "$WAR_FILE"
                     ls -lh "$WAR_FILE"
                 '''
+
+                // Sauvegarder le WAR pour le transmettre à docker-trivy.
+                stash(
+                    name: 'ci-app-war',
+                    includes: 'ci-app/target/ci-app-1.0-SNAPSHOT.war',
+                    useDefaultExcludes: false
+                )
             }
         }
 
@@ -228,11 +236,17 @@ pipeline {
             }
 
             steps {
-                // Transfert du WAR produit sur centos-build vers cet agent.
-                // stash/unstash fonctionne entre agents Jenkins.
-                script {
-                    unstash 'ci-app-war'
-                }
+                // Récupérer le WAR sauvegardé à l'étape 3.
+                unstash 'ci-app-war'
+
+                sh '''
+                    set -eu
+
+                    test -s "$WAR_FILE"
+                    ls -lh "$WAR_FILE"
+
+                    echo "WAR transféré avec succès vers docker-trivy."
+                '''
             }
         }
     }
