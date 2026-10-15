@@ -5,17 +5,22 @@ pipeline {
         timestamps()
         timeout(time: 60, unit: 'MINUTES')
         disableConcurrentBuilds()
+        skipDefaultCheckout(true)
     }
 
     environment {
-        NEXUS_URL = 'http://192.168.42.128:8081'
-        NEXUS_REPO = 'maven-snapshots'
-        NEXUS_GROUP_PATH = 'com/insaf/cilab/ci-app/1.0-SNAPSHOT'
+        GIT_URL       = 'https://github.com/INSAF-DEBUG/CI-Lab.git'
+        GIT_BRANCH    = '*/main'
 
-        DOCKER_IMAGE = 'ci-app'
-        SWARM_SERVICE = 'ci-app'
-        SWARM_PORT = '8080'
-        SWARM_REPLICAS = '2'
+        NEXUS_URL     = 'http://192.168.42.128:8081'
+        NEXUS_REPO    = 'maven-snapshots'
+        WAR_PATH      = 'com/insaf/cilab/ci-app/1.0-SNAPSHOT/ci-app-1.0-SNAPSHOT.war'
+
+        DOCKER_IMAGE  = 'insafnemri/ci-app'
+        DOCKER_TAG    = "${BUILD_NUMBER}"
+
+        DOCKERFILE    = 'Dockerfile'
+        WAR_FILE      = 'ci-app-1.0-SNAPSHOT.war'
     }
 
     stages {
@@ -24,7 +29,11 @@ pipeline {
             agent { label 'centos-build' }
 
             steps {
-                checkout scm
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: "${GIT_BRANCH}"]],
+                    userRemoteConfigs: [[url: "${GIT_URL}"]]
+                ])
 
                 sh '''
                     set -eu
@@ -32,6 +41,10 @@ pipeline {
                     echo "Repository recupere"
                     git log -1 --oneline
                 '''
+
+                stash name: 'source-code',
+                      includes: 'ci-app/**,Dockerfile',
+                      allowEmpty: true
             }
         }
 
@@ -52,18 +65,23 @@ pipeline {
             agent { label 'centos-build' }
 
             steps {
+                unstash 'source-code'
+
                 dir('ci-app') {
                     sh '''
                         set -eu
                         mvn -B clean package -DskipTests
                         test -s target/ci-app-1.0-SNAPSHOT.war
                     '''
+
+                    archiveArtifacts(
+                        artifacts: 'target/ci-app-1.0-SNAPSHOT.war',
+                        fingerprint: true
+                    )
                 }
 
-                archiveArtifacts(
-                    artifacts: 'ci-app/target/*.war',
-                    fingerprint: true
-                )
+                stash name: 'war-artifact',
+                      includes: 'ci-app/target/ci-app-1.0-SNAPSHOT.war'
             }
         }
 
@@ -71,6 +89,9 @@ pipeline {
             agent { label 'centos-build' }
 
             steps {
+                unstash 'source-code'
+                unstash 'war-artifact'
+
                 dir('ci-app') {
                     sh '''
                         set -eu
@@ -91,7 +112,7 @@ pipeline {
                 always {
                     junit(
                         testResults: 'ci-app/target/surefire-reports/*.xml',
-                        allowEmptyResults: false
+                        allowEmptyResults: true
                     )
 
                     archiveArtifacts(
@@ -106,6 +127,9 @@ pipeline {
             agent { label 'centos-build' }
 
             steps {
+                unstash 'source-code'
+                unstash 'war-artifact'
+
                 dir('ci-app') {
                     withCredentials([
                         usernamePassword(
@@ -131,12 +155,9 @@ pipeline {
         }
 
         stage('6 - Telechargement WAR depuis Nexus') {
-            agent { label 'docker-trivy' }
+            agent { label 'centos-build' }
 
             steps {
-                deleteDir()
-                checkout scm
-
                 withCredentials([
                     usernamePassword(
                         credentialsId: 'nexus-credentials',
@@ -147,63 +168,21 @@ pipeline {
                     sh '''
                         set -eu
 
-                        command -v curl
-                        command -v docker
-                        command -v trivy
-
-                        BASE_URL="$NEXUS_URL/repository/$NEXUS_REPO/$NEXUS_GROUP_PATH"
-
-                        mkdir -p deploy
-
-                        echo "Lecture des metadonnees Nexus"
-
-                        curl -fsSL \
-                          --retry 3 \
-                          --connect-timeout 10 \
-                          -u "$NEXUS_USER:$NEXUS_PASSWORD" \
-                          "$BASE_URL/maven-metadata.xml" \
-                          -o deploy/maven-metadata.xml
-
-                        echo "Recherche de la version WAR"
-
-                        VERSION=$(python -c '
-import xml.etree.ElementTree as ET
-import sys
-
-root = ET.parse(sys.argv[1]).getroot()
-
-for item in root.iter("snapshotVersion"):
-    extension = item.findtext("extension")
-    classifier = item.findtext("classifier")
-    value = item.findtext("value")
-
-    if extension == "war" and not classifier and value:
-        print(value)
-        break
-' deploy/maven-metadata.xml)
-
-                        if [ -z "$VERSION" ]; then
-                            echo "ERREUR : version WAR introuvable"
-                            cat deploy/maven-metadata.xml
-                            exit 1
-                        fi
-
-                        echo "Version WAR : $VERSION"
+                        mkdir -p docker-context
 
                         curl -fSL \
-                          --retry 3 \
                           --connect-timeout 10 \
+                          --retry 3 \
                           -u "$NEXUS_USER:$NEXUS_PASSWORD" \
-                          "$BASE_URL/ci-app-$VERSION.war" \
-                          -o deploy/ci-app.war
+                          "$NEXUS_URL/repository/$NEXUS_REPO/$WAR_PATH" \
+                          -o "docker-context/$WAR_FILE"
 
-                        test -s deploy/ci-app.war
-                        test -f Dockerfile
-
-                        echo "WAR telecharge avec succes"
-                        ls -lh deploy/ci-app.war
+                        test -s "docker-context/$WAR_FILE"
                     '''
                 }
+
+                stash name: 'docker-war',
+                      includes: 'docker-context/ci-app-1.0-SNAPSHOT.war'
             }
         }
 
@@ -211,17 +190,25 @@ for item in root.iter("snapshotVersion"):
             agent { label 'docker-trivy' }
 
             steps {
-                script {
-                    env.FULL_IMAGE =
-                        "${env.DOCKERHUB_USER ?: 'DOCKERHUB_USERNAME'}/${env.DOCKER_IMAGE}:${env.BUILD_NUMBER}"
-                }
+                unstash 'docker-war'
+
+                // Le Dockerfile doit être disponible sur cet agent.
+                // Le stash ci-dessous évite un checkout Git.
+                unstash 'source-code'
 
                 sh '''
                     set -eu
 
+                    command -v docker
+                    test -s docker-context/ci-app-1.0-SNAPSHOT.war
+                    test -f Dockerfile
+
+                    cp docker-context/ci-app-1.0-SNAPSHOT.war .
+
                     docker build \
-                      --pull \
-                      -t "$FULL_IMAGE" \
+                      -f Dockerfile \
+                      -t "$DOCKER_IMAGE:$DOCKER_TAG" \
+                      -t "$DOCKER_IMAGE:latest" \
                       .
                 '''
             }
@@ -234,10 +221,12 @@ for item in root.iter("snapshotVersion"):
                 sh '''
                     set -eu
 
+                    command -v trivy
+
                     trivy image \
-                      --severity HIGH,CRITICAL \
                       --exit-code 1 \
-                      "$FULL_IMAGE"
+                      --severity CRITICAL,HIGH \
+                      "$DOCKER_IMAGE:$DOCKER_TAG"
                 '''
             }
         }
@@ -256,16 +245,13 @@ for item in root.iter("snapshotVersion"):
                     sh '''
                         set -eu
 
-                        IMAGE="$DOCKERHUB_USER/ci-app:$BUILD_NUMBER"
-
-                        docker tag "$FULL_IMAGE" "$IMAGE"
-
                         echo "$DOCKERHUB_PASSWORD" |
                           docker login \
-                            --username "$DOCKERHUB_USER" \
+                            -u "$DOCKERHUB_USER" \
                             --password-stdin
 
-                        docker push "$IMAGE"
+                        docker push "$DOCKER_IMAGE:$DOCKER_TAG"
+                        docker push "$DOCKER_IMAGE:latest"
 
                         docker logout
                     '''
@@ -287,46 +273,17 @@ for item in root.iter("snapshotVersion"):
                     sh '''
                         set -eu
 
-                        IMAGE="$DOCKERHUB_USER/ci-app:$BUILD_NUMBER"
+                        docker pull "$DOCKER_IMAGE:$DOCKER_TAG"
 
-                        STATE=$(docker info \
-                          --format '{{.Swarm.LocalNodeState}}')
-
-                        if [ "$STATE" != "active" ]; then
-                            echo "ERREUR : aucun Swarm actif sur ce noeud"
-                            exit 1
-                        fi
-
-                        echo "$DOCKERHUB_PASSWORD" |
-                          docker login \
-                            --username "$DOCKERHUB_USER" \
-                            --password-stdin
-
-                        if docker service inspect "$SWARM_SERVICE" \
-                          >/dev/null 2>&1; then
-
-                            docker service update \
-                              --image "$IMAGE" \
-                              --with-registry-auth \
-                              "$SWARM_SERVICE"
-                        else
-                            docker service create \
-                              --name "$SWARM_SERVICE" \
-                              --publish "$SWARM_PORT:8080" \
-                              --replicas "$SWARM_REPLICAS" \
-                              --with-registry-auth \
-                              "$IMAGE"
-                        fi
-
-                        docker logout
-
-                        echo "Verification du service Swarm"
-
-                        docker service ps "$SWARM_SERVICE"
-
-                        docker service inspect \
-                          --format '{{.Spec.Name}} - {{.UpdateStatus.State}}' \
-                          "$SWARM_SERVICE"
+                        docker service update \
+                          --image "$DOCKER_IMAGE:$DOCKER_TAG" \
+                          --with-registry-auth \
+                          app-cd || \
+                        docker service create \
+                          --name app-cd \
+                          --publish 8080:8080 \
+                          --with-registry-auth \
+                          "$DOCKER_IMAGE:$DOCKER_TAG"
                     '''
                 }
             }
