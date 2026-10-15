@@ -9,13 +9,16 @@ pipeline {
     }
 
     environment {
-        GIT_URL       = 'https://github.com/INSAF-DEBUG/CI-Lab.git'
-        NEXUS_URL     = 'http://192.168.42.128:8081'
-        NEXUS_REPO    = 'maven-snapshots'
-        GROUP_PATH    = 'com/insaf/cilab/ci-app'
-        WAR_FILE      = 'ci-app-1.0-SNAPSHOT.war'
-        DOCKER_IMAGE  = 'insafnemri/ci-app'
-        DOCKER_TAG    = "${BUILD_NUMBER}"
+        GIT_URL         = 'https://github.com/INSAF-DEBUG/CI-Lab.git'
+        NEXUS_URL       = 'http://192.168.42.128:8081'
+        NEXUS_REPO      = 'maven-snapshots'
+        GROUP_PATH      = 'com/insaf/cilab/ci-app'
+        WAR_FILE        = 'ci-app-1.0-SNAPSHOT.war'
+        DOCKER_IMAGE    = 'insafnemri/ci-app'
+        DOCKER_TAG      = "${BUILD_NUMBER}"
+
+        // Cache Trivy deja telecharge sur la VM docker-trivy (utilisateur trivy)
+        TRIVY_CACHE_DIR = '/home/trivy/.cache/trivy'
     }
 
     stages {
@@ -301,7 +304,28 @@ EOF
                 sh '''
                     set -eu
 
+                    # La base de vulnerabilites doit deja etre en cache :
+                    # on ne la telecharge pas pendant le build (reseau instable).
+                    if [ ! -f "$TRIVY_CACHE_DIR/db/trivy.db" ]; then
+                        echo "ERREUR : base Trivy absente dans $TRIVY_CACHE_DIR/db"
+                        echo "Telechargez-la manuellement sur la VM docker-trivy."
+                        exit 1
+                    fi
+
+                    # CVE acceptees (binaire pebble de l'image de base, non utilise)
+                    cat > .trivyignore <<'EOF'
+CVE-2026-78667
+CVE-2026-78669
+CVE-2026-97031
+EOF
+
                     trivy image \
+                      --cache-dir "$TRIVY_CACHE_DIR" \
+                      --skip-db-update \
+                      --skip-java-db-update \
+                      --scanners vuln \
+                      --ignorefile .trivyignore \
+                      --timeout 10m \
                       --exit-code 1 \
                       --severity CRITICAL,HIGH \
                       "$DOCKER_IMAGE:$DOCKER_TAG"
