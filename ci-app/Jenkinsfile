@@ -33,6 +33,7 @@ pipeline {
 
         DOCKERHUB_USER = 'insafnemri'
         DOCKER_IMAGE = 'insafnemri/ci-app'
+
         WAR_FILE = 'ci-app/target/ci-app-1.0-SNAPSHOT.war'
     }
 
@@ -163,19 +164,28 @@ pipeline {
         stage('7 - Publication Maven vers Nexus') {
             steps {
                 dir('ci-app') {
-                    sh '''
-                        set -eu
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'nexus-credentials',
+                            usernameVariable: 'NEXUS_USER',
+                            passwordVariable: 'NEXUS_PASSWORD'
+                        )
+                    ]) {
+                        sh '''
+                            set -eu
 
-                        echo "=== Verification de Nexus ==="
+                            echo "=== Verification de Nexus ==="
 
-                        curl -fsS \
-                          --connect-timeout 10 \
-                          "$NEXUS_URL/" \
-                          -o /dev/null
+                            curl -fsS \
+                              --connect-timeout 10 \
+                              --user "$NEXUS_USER:$NEXUS_PASSWORD" \
+                              "$NEXUS_URL/" \
+                              -o /dev/null
 
-                        echo "=== Publication Maven ==="
-                        mvn -B deploy -DskipTests
-                    '''
+                            echo "=== Publication Maven ==="
+                            mvn -B deploy -DskipTests
+                        '''
+                    }
                 }
             }
         }
@@ -250,55 +260,57 @@ pipeline {
                     trivy --version
 
                     mkdir -p ci-app/target
-
-                    echo "=== Recherche du WAR dans Nexus ==="
-
-                    withCredentials([usernamePassword(
-    credentialsId: 'nexus-credentials',
-    usernameVariable: 'NEXUS_USER',
-    passwordVariable: 'NEXUS_PASSWORD'
-)]) {
-    sh '''
-        set -eu
-                echo "=== Recherche du WAR dans Nexus ==="
-
-        curl -fsS \
-          --user "$NEXUS_USER:$NEXUS_PASSWORD" \
-          --get "http://192.168.42.128:8081/service/rest/v1/search/assets" \
-          --data-urlencode "repository=maven-snapshots" \
-          --data-urlencode "maven.artifactId=ci-app" \
-          --data-urlencode "maven.baseVersion=1.0-SNAPSHOT" \
-          --data-urlencode "maven.extension=war" \
-          -o /tmp/nexus-assets.json
-
-        echo "Recherche Nexus réussie."
-    '''
-}
-
-                    grep -oE '"downloadUrl"[[:space:]]*:[[:space:]]*"[^"]+\\.war"' \
-                      /tmp/nexus-assets.json |
-                      sed -E 's/^"downloadUrl"[[:space:]]*:[[:space:]]*"([^"]+)"$/\\1/' \
-                      > /tmp/nexus-war-urls.txt
-
-                    WAR_COUNT=$(wc -l < /tmp/nexus-war-urls.txt | tr -d ' ')
-
-                    if [ "$WAR_COUNT" -ne 1 ]; then
-                        echo "ERREUR : un seul WAR attendu, nombre trouve : $WAR_COUNT"
-                        cat /tmp/nexus-war-urls.txt
-                        exit 1
-                    fi
-
-                    DOWNLOAD_URL=$(cat /tmp/nexus-war-urls.txt)
-
-                    echo "=== Telechargement du WAR ==="
-
-                    curl -fSL \
-                      "$DOWNLOAD_URL" \
-                      -o "$WAR_FILE"
-
-                    test -s "$WAR_FILE"
-                    ls -lh "$WAR_FILE"
                 '''
+
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'nexus-credentials',
+                        usernameVariable: 'NEXUS_USER',
+                        passwordVariable: 'NEXUS_PASSWORD'
+                    )
+                ]) {
+                    sh '''
+                        set -eu
+
+                        echo "=== Recherche du WAR dans Nexus ==="
+
+                        curl -fsS \
+                          --user "$NEXUS_USER:$NEXUS_PASSWORD" \
+                          --get "$NEXUS_URL/service/rest/v1/search/assets" \
+                          --data-urlencode "repository=$NEXUS_REPO" \
+                          --data-urlencode "maven.artifactId=$APP_NAME" \
+                          --data-urlencode "maven.baseVersion=$APP_VERSION" \
+                          --data-urlencode "maven.extension=war" \
+                          -o /tmp/nexus-assets.json
+
+                        echo "=== Extraction de l'URL du WAR ==="
+
+                        grep -oE '"downloadUrl"[[:space:]]*:[[:space:]]*"[^"]+\\.war"' \
+                          /tmp/nexus-assets.json |
+                          sed -E 's/^"downloadUrl"[[:space:]]*:[[:space:]]*"([^"]+)"$/\\1/' \
+                          > /tmp/nexus-war-urls.txt
+
+                        WAR_COUNT=$(wc -l < /tmp/nexus-war-urls.txt | tr -d ' ')
+
+                        if [ "$WAR_COUNT" -ne 1 ]; then
+                            echo "ERREUR : un seul WAR attendu, nombre trouve : $WAR_COUNT"
+                            cat /tmp/nexus-war-urls.txt
+                            exit 1
+                        fi
+
+                        DOWNLOAD_URL=$(cat /tmp/nexus-war-urls.txt)
+
+                        echo "=== Telechargement du WAR ==="
+
+                        curl -fSL \
+                          --user "$NEXUS_USER:$NEXUS_PASSWORD" \
+                          "$DOWNLOAD_URL" \
+                          -o "$WAR_FILE"
+
+                        test -s "$WAR_FILE"
+                        ls -lh "$WAR_FILE"
+                    '''
+                }
 
                 sh '''
                     set -eu
