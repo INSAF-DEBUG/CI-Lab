@@ -253,13 +253,26 @@ pipeline {
 
                     echo "=== Recherche du WAR dans Nexus ==="
 
-                    curl -fsS --get \
-                      "$NEXUS_URL/service/rest/v1/search/assets" \
-                      --data-urlencode "repository=$NEXUS_REPO" \
-                      --data-urlencode "maven.artifactId=$APP_NAME" \
-                      --data-urlencode "maven.baseVersion=$APP_VERSION" \
-                      --data-urlencode "maven.extension=war" \
-                      -o /tmp/nexus-assets.json
+                    withCredentials([usernamePassword(
+    credentialsId: 'nexus-credentials',
+    usernameVariable: 'NEXUS_USER',
+    passwordVariable: 'NEXUS_PASSWORD'
+)]) {
+    sh '''
+        set -eu
+
+        curl -fsS \
+          --user "$NEXUS_USER:$NEXUS_PASSWORD" \
+          --get "http://192.168.42.128:8081/service/rest/v1/search/assets" \
+          --data-urlencode "repository=maven-snapshots" \
+          --data-urlencode "maven.artifactId=ci-app" \
+          --data-urlencode "maven.baseVersion=1.0-SNAPSHOT" \
+          --data-urlencode "maven.extension=war" \
+          -o /tmp/nexus-assets.json
+
+        echo "Recherche Nexus réussie."
+    '''
+}
 
                     grep -oE '"downloadUrl"[[:space:]]*:[[:space:]]*"[^"]+\\.war"' \
                       /tmp/nexus-assets.json |
