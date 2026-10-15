@@ -1,3 +1,4 @@
+```groovy
 pipeline {
     agent none
 
@@ -23,6 +24,9 @@ pipeline {
 
     stages {
 
+        // =====================================================
+        // 1. CHECKOUT GIT
+        // =====================================================
         stage('1 - Checkout Git') {
             agent { label 'centos-build' }
 
@@ -32,67 +36,92 @@ pipeline {
                 sh '''
                     set -eu
 
+                    echo "=== Version Git ==="
                     git --version
+
+                    echo "=== Configuration HTTP ==="
                     git config --global http.version HTTP/1.1
 
+                    echo "=== Initialisation du depot ==="
                     git init .
                     git remote add origin "$GIT_URL"
-
                     git config core.compression 0
 
                     attempt=1
+
                     until git -c http.version=HTTP/1.1 fetch \
                         --no-tags origin \
                         +refs/heads/main:refs/remotes/origin/main
                     do
                         if [ "$attempt" -ge 3 ]; then
-                            echo "ERREUR : impossible de recuperer main depuis GitHub."
+                            echo "ERREUR : echec du telechargement Git apres 3 tentatives."
                             exit 1
                         fi
 
-                        echo "Echec du fetch, nouvelle tentative..."
+                        echo "Nouvelle tentative Git : $attempt"
                         attempt=$((attempt + 1))
                         sleep 3
                     done
 
                     git checkout -B main refs/remotes/origin/main
 
+                    echo "=== Verification des fichiers ==="
                     test -f ci-app/pom.xml
                     test -f Dockerfile
 
-                    echo "Commit recupere :"
                     git log -1 --oneline
+
+                    echo "=== Fichiers disponibles ==="
+                    ls -la
+                    ls -la ci-app
                 '''
 
-                stash name: 'source-code',
-                      includes: 'ci-app/**,Dockerfile'
+                stash(
+                    name: 'source-code',
+                    includes: 'Dockerfile,ci-app/**',
+                    useDefaultExcludes: false
+                )
             }
         }
 
+        // =====================================================
+        // 2. VERIFICATION JAVA ET MAVEN
+        // =====================================================
         stage('2 - Verification Java et Maven') {
             agent { label 'centos-build' }
 
             steps {
                 sh '''
                     set -eu
+
                     java -version
                     mvn -version
                     git --version
+
+                    echo "Java et Maven sont disponibles."
                 '''
             }
         }
 
+        // =====================================================
+        // 3. BUILD MAVEN
+        // =====================================================
         stage('3 - Build Maven') {
             agent { label 'centos-build' }
 
             steps {
+                deleteDir()
                 unstash 'source-code'
 
                 dir('ci-app') {
                     sh '''
                         set -eu
+
                         mvn -B clean package -DskipTests
+
                         test -s target/ci-app-1.0-SNAPSHOT.war
+
+                        ls -lh target/ci-app-1.0-SNAPSHOT.war
                     '''
 
                     archiveArtifacts(
@@ -101,21 +130,28 @@ pipeline {
                     )
                 }
 
-                stash name: 'war-artifact',
-                      includes: 'ci-app/target/ci-app-1.0-SNAPSHOT.war'
+                stash(
+                    name: 'war-artifact',
+                    includes: 'ci-app/target/ci-app-1.0-SNAPSHOT.war'
+                )
             }
         }
 
+        // =====================================================
+        // 4. TESTS ET COUVERTURE JACOCO
+        // =====================================================
         stage('4 - Tests et couverture JaCoCo') {
             agent { label 'centos-build' }
 
             steps {
+                deleteDir()
                 unstash 'source-code'
                 unstash 'war-artifact'
 
                 dir('ci-app') {
                     sh '''
                         set -eu
+
                         export MOZ_HEADLESS=1
 
                         mvn -B \
@@ -125,6 +161,8 @@ pipeline {
 
                         test -f target/site/jacoco/index.html
                         test -f target/site/jacoco/jacoco.xml
+
+                        echo "Rapport JaCoCo genere."
                     '''
                 }
             }
@@ -144,10 +182,14 @@ pipeline {
             }
         }
 
+        // =====================================================
+        // 5. PUBLICATION MAVEN VERS NEXUS
+        // =====================================================
         stage('5 - Publication Maven vers Nexus') {
             agent { label 'centos-build' }
 
             steps {
+                deleteDir()
                 unstash 'source-code'
                 unstash 'war-artifact'
 
@@ -162,11 +204,15 @@ pipeline {
                         sh '''
                             set -eu
 
+                            echo "=== Verification Nexus ==="
+
                             curl -fsS \
                               --connect-timeout 10 \
                               -u "$NEXUS_USER:$NEXUS_PASSWORD" \
                               "$NEXUS_URL/" \
                               -o /dev/null
+
+                            echo "=== Publication Maven ==="
 
                             mvn -B deploy -DskipTests
                         '''
@@ -175,10 +221,15 @@ pipeline {
             }
         }
 
+        // =====================================================
+        // 6. TELECHARGEMENT DU WAR DEPUIS NEXUS
+        // =====================================================
         stage('6 - Telechargement WAR depuis Nexus') {
             agent { label 'centos-build' }
 
             steps {
+                deleteDir()
+
                 withCredentials([
                     usernamePassword(
                         credentialsId: 'nexus-credentials',
@@ -191,6 +242,8 @@ pipeline {
 
                         mkdir -p docker-context
 
+                        echo "=== Telechargement depuis Nexus ==="
+
                         curl -fSL \
                           --connect-timeout 10 \
                           --retry 3 \
@@ -199,18 +252,27 @@ pipeline {
                           -o "docker-context/$WAR_FILE"
 
                         test -s "docker-context/$WAR_FILE"
+
+                        ls -lh "docker-context/$WAR_FILE"
                     '''
                 }
 
-                stash name: 'docker-war',
-                      includes: 'docker-context/ci-app-1.0-SNAPSHOT.war'
+                stash(
+                    name: 'docker-war',
+                    includes: 'docker-context/ci-app-1.0-SNAPSHOT.war'
+                )
             }
         }
 
+        // =====================================================
+        // 7. CONSTRUCTION DE L'IMAGE DOCKER
+        // =====================================================
         stage('7 - Build image Docker') {
             agent { label 'docker-trivy' }
 
             steps {
+                deleteDir()
+
                 unstash 'source-code'
                 unstash 'docker-war'
 
@@ -218,20 +280,29 @@ pipeline {
                     set -eu
 
                     command -v docker
-                    test -s "docker-context/$WAR_FILE"
+
                     test -f Dockerfile
+                    test -s "docker-context/$WAR_FILE"
 
                     cp "docker-context/$WAR_FILE" "$WAR_FILE"
 
+                    echo "=== Construction de l'image ==="
+
                     docker build \
+                      --pull \
                       -f Dockerfile \
                       -t "$DOCKER_IMAGE:$DOCKER_TAG" \
                       -t "$DOCKER_IMAGE:latest" \
                       .
+
+                    docker image inspect "$DOCKER_IMAGE:$DOCKER_TAG"
                 '''
             }
         }
 
+        // =====================================================
+        // 8. SCAN DE SECURITE TRIVY
+        // =====================================================
         stage('8 - Scan securite Trivy') {
             agent { label 'docker-trivy' }
 
@@ -241,14 +312,21 @@ pipeline {
 
                     command -v trivy
 
+                    echo "=== Analyse des vulnerabilites ==="
+
                     trivy image \
                       --exit-code 1 \
                       --severity CRITICAL,HIGH \
                       "$DOCKER_IMAGE:$DOCKER_TAG"
+
+                    echo "Aucune vulnerabilite CRITICAL ou HIGH bloquante."
                 '''
             }
         }
 
+        // =====================================================
+        // 9. PUBLICATION DOCKER HUB
+        // =====================================================
         stage('9 - Push Docker Hub') {
             agent { label 'docker-trivy' }
 
@@ -277,26 +355,50 @@ pipeline {
             }
         }
 
+        // =====================================================
+        // 10. DEPLOIEMENT DOCKER SWARM
+        // =====================================================
         stage('10 - Deploiement Docker Swarm') {
             agent { label 'docker-trivy' }
 
             steps {
-                sh '''
-                    set -eu
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub-credentials',
+                        usernameVariable: 'DOCKERHUB_USER',
+                        passwordVariable: 'DOCKERHUB_PASSWORD'
+                    )
+                ]) {
+                    sh '''
+                        set -eu
 
-                    docker pull "$DOCKER_IMAGE:$DOCKER_TAG"
+                        echo "$DOCKERHUB_PASSWORD" |
+                          docker login \
+                            -u "$DOCKERHUB_USER" \
+                            --password-stdin
 
-                    if docker service inspect app-cd >/dev/null 2>&1; then
-                        docker service update \
-                          --image "$DOCKER_IMAGE:$DOCKER_TAG" \
-                          app-cd
-                    else
-                        docker service create \
-                          --name app-cd \
-                          --publish 8080:8080 \
-                          "$DOCKER_IMAGE:$DOCKER_TAG"
-                    fi
-                '''
+                        docker pull "$DOCKER_IMAGE:$DOCKER_TAG"
+
+                        if docker service inspect app-cd >/dev/null 2>&1; then
+                            docker service update \
+                              --image "$DOCKER_IMAGE:$DOCKER_TAG" \
+                              --with-registry-auth \
+                              app-cd
+                        else
+                            docker service create \
+                              --name app-cd \
+                              --publish 8080:8080 \
+                              --with-registry-auth \
+                              "$DOCKER_IMAGE:$DOCKER_TAG"
+                        fi
+
+                        docker logout
+
+                        echo "=== Etat du service ==="
+                        docker service ls
+                        docker service ps app-cd
+                    '''
+                }
             }
         }
     }
@@ -315,3 +417,4 @@ pipeline {
         }
     }
 }
+```
