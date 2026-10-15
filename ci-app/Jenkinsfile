@@ -1,3 +1,4 @@
+
 pipeline {
     agent none
 
@@ -9,15 +10,17 @@ pipeline {
     }
 
     environment {
-        GIT_URL         = 'https://github.com/INSAF-DEBUG/CI-Lab.git'
-        NEXUS_URL       = 'http://192.168.42.128:8081'
-        NEXUS_REPO      = 'maven-snapshots'
-        GROUP_PATH      = 'com/insaf/cilab/ci-app'
-        WAR_FILE        = 'ci-app-1.0-SNAPSHOT.war'
-        DOCKER_IMAGE    = 'insafnemri/ci-app'
-        DOCKER_TAG      = "${BUILD_NUMBER}"
+        GIT_URL       = 'https://github.com/INSAF-DEBUG/CI-Lab.git'
 
-        // Cache Trivy deja telecharge sur la VM docker-trivy (utilisateur trivy)
+        NEXUS_URL     = 'http://192.168.42.128:8081'
+        NEXUS_REPO    = 'maven-snapshots'
+        GROUP_PATH    = 'com/insaf/cilab/ci-app'
+        WAR_FILE      = 'ci-app-1.0-SNAPSHOT.war'
+
+        DOCKER_IMAGE  = 'insafnemri/ci-app'
+        DOCKER_TAG    = "${BUILD_NUMBER}"
+
+        // Cache Trivy sur la VM docker-trivy
         TRIVY_CACHE_DIR = '/home/trivy/.cache/trivy'
     }
 
@@ -34,11 +37,13 @@ pipeline {
 
                     git --version
                     git config --global http.version HTTP/1.1
+
                     git init .
                     git remote add origin "$GIT_URL"
                     git config core.compression 0
 
                     attempt=1
+
                     until git -c http.version=HTTP/1.1 fetch \
                         --no-tags origin \
                         +refs/heads/main:refs/remotes/origin/main
@@ -47,6 +52,7 @@ pipeline {
                             echo "ERREUR : echec du checkout Git"
                             exit 1
                         fi
+
                         attempt=$((attempt + 1))
                         sleep 3
                     done
@@ -54,6 +60,7 @@ pipeline {
                     git checkout -B main refs/remotes/origin/main
 
                     test -f ci-app/pom.xml
+                    test -f ci-app/Jenkinsfile
 
                     echo "Fichiers du projet :"
                     find ci-app -maxdepth 2 -type f | head -40
@@ -75,7 +82,11 @@ pipeline {
             steps {
                 sh '''
                     set -eu
+
+                    echo "=== Java ==="
                     java -version
+
+                    echo "=== Maven ==="
                     mvn -version
                 '''
             }
@@ -91,8 +102,11 @@ pipeline {
                 dir('ci-app') {
                     sh '''
                         set -eu
+
                         mvn -B clean package -DskipTests
+
                         test -s target/ci-app-1.0-SNAPSHOT.war
+
                         ls -lh target/ci-app-1.0-SNAPSHOT.war
                     '''
 
@@ -119,6 +133,7 @@ pipeline {
                 dir('ci-app') {
                     sh '''
                         set -eu
+
                         export MOZ_HEADLESS=1
 
                         mvn -B \
@@ -165,6 +180,8 @@ pipeline {
 
                             SETTINGS="$WORKSPACE/nexus-settings.xml"
 
+                            trap 'rm -f "$SETTINGS"' EXIT
+
                             cat > "$SETTINGS" <<EOF
 <settings>
   <servers>
@@ -185,8 +202,6 @@ EOF
                               -DrepositoryId=jenkins-nexus \
                               -Durl="$NEXUS_URL/repository/$NEXUS_REPO/" \
                               -DretryFailedDeploymentCount=3
-
-                            rm -f "$SETTINGS"
                         '''
                     }
                 }
@@ -214,20 +229,33 @@ EOF
                         BASE_URL="$NEXUS_URL/repository/$NEXUS_REPO/$GROUP_PATH/1.0-SNAPSHOT"
                         META_FILE="$WORKSPACE/maven-metadata.xml"
 
+                        trap 'rm -f "$META_FILE"' EXIT
+
                         curl -fsSL \
                           --retry 3 \
+                          --connect-timeout 15 \
+                          --max-time 120 \
                           -u "$NEXUS_USER:$NEXUS_PASSWORD" \
                           "$BASE_URL/maven-metadata.xml" \
                           -o "$META_FILE"
 
                         SNAPSHOT_VALUE=$(awk '
-                            /<snapshotVersion>/ { block=1; ext=0; value="" }
-                            block && /<extension>war<\\/extension>/ { ext=1 }
+                            /<snapshotVersion>/ {
+                                block=1
+                                ext=0
+                                value=""
+                            }
+
+                            block && /<extension>war<\\/extension>/ {
+                                ext=1
+                            }
+
                             block && /<value>/ {
                                 gsub(/.*<value>/, "")
                                 gsub(/<\\/value>.*/, "")
                                 value=$0
                             }
+
                             block && /<\\/snapshotVersion>/ {
                                 if (ext && value != "") {
                                     print value
@@ -246,13 +274,16 @@ EOF
                         echo "Telechargement du WAR depuis Nexus"
                         echo "$ARTIFACT_URL"
 
-                        curl -fSL \
+                        curl -fsSL \
                           --retry 3 \
+                          --connect-timeout 15 \
+                          --max-time 180 \
                           -u "$NEXUS_USER:$NEXUS_PASSWORD" \
                           "$ARTIFACT_URL" \
                           -o "docker-context/$WAR_FILE"
 
                         test -s "docker-context/$WAR_FILE"
+
                         ls -lh "docker-context/$WAR_FILE"
                     '''
                 }
@@ -274,15 +305,21 @@ EOF
                 sh '''
                     set -eu
 
+                    echo "=== Verification Docker ==="
                     command -v docker
+                    docker version
 
                     cp "docker-context/$WAR_FILE" "$WAR_FILE"
 
                     cat > Dockerfile <<'EOF'
 FROM tomcat:9.0-jdk8-temurin
+
 RUN rm -rf /usr/local/tomcat/webapps/*
+
 COPY ci-app-1.0-SNAPSHOT.war /usr/local/tomcat/webapps/ROOT.war
+
 EXPOSE 8080
+
 CMD ["catalina.sh", "run"]
 EOF
 
@@ -292,7 +329,10 @@ EOF
                       -t "$DOCKER_IMAGE:latest" \
                       .
 
-                    docker image inspect "$DOCKER_IMAGE:$DOCKER_TAG"
+                    docker image inspect "$DOCKER_IMAGE:$DOCKER_TAG" \
+                      --format 'Image ID: {{.Id}}'
+
+                    echo "Construction Docker terminee."
                 '''
             }
         }
@@ -304,20 +344,51 @@ EOF
                 sh '''
                     set -eu
 
-                    # La base de vulnerabilites doit deja etre en cache :
-                    # on ne la telecharge pas pendant le build (reseau instable).
-                    if [ ! -f "$TRIVY_CACHE_DIR/db/trivy.db" ]; then
-                        echo "ERREUR : base Trivy absente dans $TRIVY_CACHE_DIR/db"
-                        echo "Telechargez-la manuellement sur la VM docker-trivy."
+                    echo "=== Environnement Jenkins ==="
+                    whoami
+                    id
+                    echo "HOME=$HOME"
+
+                    echo "=== Verification Trivy ==="
+                    command -v trivy
+                    trivy --version
+
+                    echo "=== Verification du cache ==="
+
+                    if [ ! -d "$TRIVY_CACHE_DIR/db" ]; then
+                        echo "ERREUR : repertoire DB absent :"
+                        echo "$TRIVY_CACHE_DIR/db"
                         exit 1
                     fi
 
-                    # CVE acceptees (binaire pebble de l'image de base, non utilise)
+                    if [ ! -r "$TRIVY_CACHE_DIR/db/trivy.db" ]; then
+                        echo "ERREUR : base absente ou illisible :"
+                        echo "$TRIVY_CACHE_DIR/db/trivy.db"
+                        echo "Utilisateur Jenkins : $(whoami)"
+                        echo "HOME Jenkins : $HOME"
+                        echo "Le repertoire /home/trivy peut interdire l'acces."
+                        exit 1
+                    fi
+
+                    ls -lh "$TRIVY_CACHE_DIR/db/trivy.db"
+
+                    if [ ! -r "$TRIVY_CACHE_DIR/db/metadata.json" ]; then
+                        echo "ERREUR : metadata.json absent ou illisible."
+                        exit 1
+                    fi
+
+                    echo "=== Preparation des exclusions ==="
+
                     cat > .trivyignore <<'EOF'
 CVE-2026-78667
 CVE-2026-78669
 CVE-2026-97031
 EOF
+
+                    echo "=== Analyse de l'image ==="
+
+                    docker image inspect "$DOCKER_IMAGE:$DOCKER_TAG" \
+                      >/dev/null
 
                     trivy image \
                       --cache-dir "$TRIVY_CACHE_DIR" \
@@ -329,6 +400,8 @@ EOF
                       --exit-code 1 \
                       --severity CRITICAL,HIGH \
                       "$DOCKER_IMAGE:$DOCKER_TAG"
+
+                    echo "Analyse Trivy terminee sans vulnerabilites bloquees."
                 '''
             }
         }
@@ -380,6 +453,8 @@ EOF
                             --username "$DOCKERHUB_USER" \
                             --password-stdin
 
+                        trap 'docker logout >/dev/null 2>&1 || true' EXIT
+
                         docker pull "$DOCKER_IMAGE:$DOCKER_TAG"
 
                         if docker service inspect app-cd >/dev/null 2>&1; then
@@ -394,8 +469,6 @@ EOF
                               --with-registry-auth \
                               "$DOCKER_IMAGE:$DOCKER_TAG"
                         fi
-
-                        docker logout
 
                         docker service ls
                         docker service ps app-cd
