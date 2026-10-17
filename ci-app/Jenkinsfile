@@ -1,3 +1,4 @@
+
 pipeline {
     agent none
 
@@ -9,20 +10,22 @@ pipeline {
     }
 
     environment {
-        GIT_URL        = 'https://github.com/INSAF-DEBUG/CI-Lab.git'
-        GIT_BRANCH     = 'main'
+        GIT_URL          = 'https://github.com/INSAF-DEBUG/CI-Lab.git'
+        GIT_BRANCH       = 'main'
 
-        NEXUS_URL      = 'http://192.168.42.128:8081'
-        NEXUS_REPO     = 'maven-snapshots'
-        NEXUS_GROUP    = 'com.insaf.cilab'
-        GROUP_PATH     = 'com/insaf/cilab/ci-app'
-        WAR_FILE       = 'ci-app-1.0-SNAPSHOT.war'
+        NEXUS_URL        = 'http://192.168.42.128:8081'
+        NEXUS_REPO       = 'maven-snapshots'
+        NEXUS_GROUP      = 'com.insaf.cilab'
+        GROUP_PATH       = 'com/insaf/cilab/ci-app'
+        WAR_FILE         = 'ci-app-1.0-SNAPSHOT.war'
 
-        DOCKER_IMAGE   = 'insafnemri/ci-app'
-        DOCKER_TAG     = "${BUILD_NUMBER}"
+        DOCKER_IMAGE     = 'insafnemri/ci-app'
+        DOCKER_TAG       = "${BUILD_NUMBER}"
 
-        // CORRECTION : chemin réel du cache pour l'utilisateur docker
-        TRIVY_CACHE_DIR = '/home/docker/.cache/trivy'
+        TRIVY_CACHE_DIR  = '/home/docker/.cache/trivy'
+
+        // Service Swarm existant dans ton environnement
+        SWARM_SERVICE    = 'ci-app'
     }
 
     stages {
@@ -122,7 +125,7 @@ pipeline {
                         mvn -B clean package -DskipTests
 
                         echo "=== Verification du WAR ==="
-                        test -f "target/$WAR_FILE"
+                        test -s "target/$WAR_FILE"
 
                         ls -lh "target/$WAR_FILE"
 
@@ -215,7 +218,7 @@ pipeline {
                         set -eu
 
                         echo "=== Verification du WAR ==="
-                        test -f "ci-app/target/$WAR_FILE"
+                        test -s "ci-app/target/$WAR_FILE"
                         ls -lh "ci-app/target/$WAR_FILE"
 
                         echo "=== Preparation des identifiants Maven ==="
@@ -256,7 +259,7 @@ EOF
         }
 
         // ============================================================
-        // STAGE 6 : TELECHARGEMENT DU WAR DEPUIS NEXUS
+        // STAGE 6 : TELECHARGEMENT AUTHENTIFIE DU WAR DEPUIS NEXUS
         // ============================================================
         stage('6 - Recuperation du WAR depuis Nexus') {
             agent {
@@ -264,54 +267,83 @@ EOF
             }
 
             steps {
-                sh '''
-                    set -eu
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'nexus-credentials',
+                        usernameVariable: 'NEXUS_USER',
+                        passwordVariable: 'NEXUS_PASSWORD'
+                    )
+                ]) {
+                    sh '''
+                        set -eu
 
-                    mkdir -p docker-context
+                        mkdir -p docker-context
 
-                    echo "=== Recuperation des metadonnees Nexus ==="
+                        METADATA_URL="$NEXUS_URL/repository/$NEXUS_REPO/$GROUP_PATH/1.0-SNAPSHOT/maven-metadata.xml"
 
-                    curl --fail --silent --show-error \
-                        "$NEXUS_URL/repository/$NEXUS_REPO/$GROUP_PATH/1.0-SNAPSHOT/maven-metadata.xml" \
-                        -o docker-context/maven-metadata.xml
+                        echo "=== Recuperation des metadonnees Nexus ==="
 
-                    echo "=== Identification de la version du WAR ==="
+                        curl --fail --silent --show-error \
+                            --retry 3 \
+                            --retry-delay 2 \
+                            --user "$NEXUS_USER:$NEXUS_PASSWORD" \
+                            "$METADATA_URL" \
+                            -o docker-context/maven-metadata.xml
 
-                    SNAPSHOT_VERSION=$(python -c '
+                        test -s docker-context/maven-metadata.xml
+
+                        echo "=== Identification de la version du WAR ==="
+
+                        SNAPSHOT_VERSION=$(python -c '
 import xml.etree.ElementTree as ET
 
 root = ET.parse("docker-context/maven-metadata.xml").getroot()
 
-for item in root.findall(".//snapshotVersion"):
-    extension = item.findtext("extension")
-    classifier = item.findtext("classifier")
-    value = item.findtext("value")
+def child_text(element, name):
+    for child in element:
+        if child.tag.split("}")[-1] == name:
+            return child.text
+    return None
+
+for item in root.iter():
+    if item.tag.split("}")[-1] != "snapshotVersion":
+        continue
+
+    extension = child_text(item, "extension")
+    classifier = child_text(item, "classifier")
+    value = child_text(item, "value")
 
     if extension == "war" and not classifier and value:
         print(value)
         break
 ')
 
-                    if [ -z "$SNAPSHOT_VERSION" ]; then
-                        echo "ERREUR : version du WAR introuvable dans Nexus."
-                        exit 1
-                    fi
+                        if [ -z "$SNAPSHOT_VERSION" ]; then
+                            echo "ERREUR : version du WAR introuvable dans Nexus."
+                            exit 1
+                        fi
 
-                    echo "Version Nexus trouvee : $SNAPSHOT_VERSION"
+                        echo "Version Nexus trouvee : $SNAPSHOT_VERSION"
 
-                    WAR_URL="$NEXUS_URL/repository/$NEXUS_REPO/$GROUP_PATH/1.0-SNAPSHOT/ci-app-$SNAPSHOT_VERSION.war"
+                        WAR_URL="$NEXUS_URL/repository/$NEXUS_REPO/$GROUP_PATH/1.0-SNAPSHOT/ci-app-$SNAPSHOT_VERSION.war"
 
-                    echo "=== Telechargement du WAR ==="
+                        echo "=== Telechargement authentifie du WAR ==="
 
-                    curl --fail --silent --show-error \
-                        "$WAR_URL" \
-                        -o "docker-context/$WAR_FILE"
+                        curl --fail --silent --show-error \
+                            --retry 3 \
+                            --retry-delay 2 \
+                            --user "$NEXUS_USER:$NEXUS_PASSWORD" \
+                            "$WAR_URL" \
+                            -o "docker-context/$WAR_FILE"
 
-                    test -s "docker-context/$WAR_FILE"
-                    ls -lh "docker-context/$WAR_FILE"
+                        test -s "docker-context/$WAR_FILE"
 
-                    echo "WAR recupere depuis Nexus."
-                '''
+                        echo "=== Verification du WAR ==="
+                        ls -lh "docker-context/$WAR_FILE"
+
+                        echo "WAR recupere depuis Nexus avec succes."
+                    '''
+                }
 
                 stash(
                     name: 'nexus-war',
@@ -368,7 +400,7 @@ EOF
                         echo "=== Verification de l'image ==="
 
                         docker image inspect "$DOCKER_IMAGE:$DOCKER_TAG" \
-                            --format 'Image={{.RepoTags}}'
+                            --format 'Image={{.Id}}'
 
                         docker images "$DOCKER_IMAGE"
 
@@ -399,36 +431,35 @@ EOF
                     command -v trivy
                     trivy --version
 
-                    echo "=== Verification du cache ==="
+                    echo "=== Verification du cache Trivy ==="
                     echo "TRIVY_CACHE_DIR=$TRIVY_CACHE_DIR"
 
-                    if [ ! -d "$TRIVY_CACHE_DIR/db" ]; then
-                        echo "ERREUR : repertoire de base Trivy introuvable :"
-                        echo "$TRIVY_CACHE_DIR/db"
+                    test -d "$TRIVY_CACHE_DIR/db" || {
+                        echo "ERREUR : repertoire de base Trivy absent."
                         exit 1
-                    fi
+                    }
 
-                    if [ ! -f "$TRIVY_CACHE_DIR/db/trivy.db" ]; then
-                        echo "ERREUR : trivy.db est absent."
+                    test -s "$TRIVY_CACHE_DIR/db/trivy.db" || {
+                        echo "ERREUR : trivy.db absent ou vide."
                         ls -lah "$TRIVY_CACHE_DIR/db"
                         exit 1
-                    fi
+                    }
 
-                    if [ ! -f "$TRIVY_CACHE_DIR/db/metadata.json" ]; then
-                        echo "ERREUR : metadata.json est absent."
+                    test -s "$TRIVY_CACHE_DIR/db/metadata.json" || {
+                        echo "ERREUR : metadata.json absent ou vide."
                         ls -lah "$TRIVY_CACHE_DIR/db"
                         exit 1
-                    fi
+                    }
 
-                    echo "Base Trivy disponible :"
+                    echo "=== Base Trivy disponible ==="
                     ls -lh "$TRIVY_CACHE_DIR/db/"
 
                     echo "=== Verification de l'image a analyser ==="
 
                     docker image inspect "$DOCKER_IMAGE:$DOCKER_TAG" \
-                        --format '{{.Id}}'
+                        --format 'Image={{.Id}}'
 
-                    echo "=== Preparation des exceptions documentees ==="
+                    echo "=== Preparation des exceptions existantes ==="
 
                     cat > .trivyignore <<'EOF'
 CVE-2026-78667
@@ -436,7 +467,7 @@ CVE-2026-78669
 CVE-2026-97031
 EOF
 
-                    echo "=== Lancement du scan de vulnerabilites ==="
+                    echo "=== Analyse des vulnerabilites ==="
 
                     trivy \
                         --cache-dir "$TRIVY_CACHE_DIR" \
@@ -450,7 +481,7 @@ EOF
                         --severity CRITICAL,HIGH \
                         "$DOCKER_IMAGE:$DOCKER_TAG"
 
-                    echo "Scan Trivy termine sans vulnerabilite HIGH/CRITICAL bloquante."
+                    echo "Scan Trivy termine : aucune vulnerabilite HIGH/CRITICAL bloquante detectee."
                 '''
             }
         }
@@ -526,9 +557,16 @@ EOF
                         set -eu
 
                         echo "=== Verification de Docker Swarm ==="
-                        docker info --format '{{.Swarm.LocalNodeState}}'
 
-                        echo "=== Recuperation de l'image publiee ==="
+                        SWARM_STATE=$(docker info --format '{{.Swarm.LocalNodeState}}')
+                        echo "Etat Swarm : $SWARM_STATE"
+
+                        if [ "$SWARM_STATE" != "active" ]; then
+                            echo "ERREUR : Docker Swarm n'est pas actif sur ce noeud."
+                            exit 1
+                        fi
+
+                        echo "=== Connexion a Docker Hub ==="
 
                         set +x
                         printf '%s' "$DOCKERHUB_PASSWORD" |
@@ -537,32 +575,34 @@ EOF
                                 --password-stdin
                         set -x
 
+                        echo "=== Recuperation de l'image publiee ==="
+
                         docker pull "$DOCKER_IMAGE:$DOCKER_TAG"
 
                         echo "=== Verification du service ==="
 
-                        if docker service inspect app-cd >/dev/null 2>&1; then
-                            echo "Le service app-cd existe deja."
+                        if docker service inspect "$SWARM_SERVICE" >/dev/null 2>&1; then
+                            echo "Le service $SWARM_SERVICE existe deja."
 
                             docker service update \
                                 --image "$DOCKER_IMAGE:$DOCKER_TAG" \
                                 --with-registry-auth \
-                                app-cd
+                                "$SWARM_SERVICE"
                         else
-                            echo "Creation du service app-cd."
+                            echo "Creation du service $SWARM_SERVICE."
 
                             docker service create \
-                                --name app-cd \
+                                --name "$SWARM_SERVICE" \
                                 --publish published=8080,target=8080 \
                                 --replicas 2 \
                                 --with-registry-auth \
                                 "$DOCKER_IMAGE:$DOCKER_TAG"
                         fi
 
-                        echo "=== Etat du service ==="
+                        echo "=== Verification du deploiement ==="
 
                         docker service ls
-                        docker service ps app-cd
+                        docker service ps "$SWARM_SERVICE"
 
                         docker logout
 
@@ -580,6 +620,7 @@ EOF
         success {
             echo 'Pipeline CI/CD termine avec succes.'
             echo "Image publiee : ${DOCKER_IMAGE}:${DOCKER_TAG}"
+            echo "Service Swarm : ${SWARM_SERVICE}"
         }
 
         failure {
