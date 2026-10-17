@@ -390,16 +390,17 @@ EOF
                     docker image inspect "$DOCKER_IMAGE:$DOCKER_TAG" \
                       >/dev/null
 
-                    trivy image \
-                      --cache-dir "$TRIVY_CACHE_DIR" \
-                      --skip-db-update \
-                      --skip-java-db-update \
-                      --scanners vuln \
-                      --ignorefile .trivyignore \
-                      --timeout 10m \
-                      --exit-code 1 \
-                      --severity CRITICAL,HIGH \
-                      "$DOCKER_IMAGE:$DOCKER_TAG"
+                    trivy \
+  --cache-dir /home/docker/.cache/trivy \
+  --timeout 30m \
+  image \
+  --skip-db-update \
+  --skip-java-db-update \
+  --scanners vuln \
+  --ignorefile .trivyignore \
+  --exit-code 1 \
+  --severity CRITICAL,HIGH \
+  "insafnemri/ci-app:${BUILD_NUMBER}"
 
                     echo "Analyse Trivy terminee sans vulnerabilites bloquees."
                 '''
