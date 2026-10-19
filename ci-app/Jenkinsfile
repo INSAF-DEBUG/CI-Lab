@@ -381,6 +381,12 @@ for item in root.iter():
                         cat > Dockerfile <<'EOF'
 FROM tomcat:9.0-jdk8-temurin
 
+USER root
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade curl libcurl4t64 \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN rm -rf /usr/local/tomcat/webapps/*
 
 COPY ci-app-1.0-SNAPSHOT.war /usr/local/tomcat/webapps/ROOT.war
@@ -392,9 +398,9 @@ EOF
 
                         echo "=== Construction de l'image ==="
 
-                        docker build \
-                            -t "$DOCKER_IMAGE:$DOCKER_TAG" \
-                            -t "$DOCKER_IMAGE:latest" \
+                        docker build --no-cache \
+        -t insafnemri/ci-app:${BUILD_NUMBER} \
+        -t insafnemri/ci-app:latest
                             .
 
                         echo "=== Verification de l'image ==="
