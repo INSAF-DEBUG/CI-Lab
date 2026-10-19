@@ -645,21 +645,25 @@ EOF
         // ============================================================
         // STAGE 10 : DEPLOIEMENT DOCKER SWARM
         // ============================================================
+       
+        // ============================================================
+        // STAGE 10 : DEPLOIEMENT DOCKER SWARM
+        // ============================================================
         stage('10 - Deploiement Docker Swarm') {
             agent {
-                label 'docker-trivy'
+                label 'docker-swarm'
             }
 
             steps {
                 withCredentials([
-                    usernamePassword(
-                        credentialsId: 'dockerhub-credentials',
-                        usernameVariable: 'DOCKERHUB_USER',
-                        passwordVariable: 'DOCKERHUB_PASSWORD'
+                    string(
+                        credentialsId: 'DOCKERHUB_TOKEN',
+                        variable: 'DOCKERHUB_PASSWORD'
                     )
                 ]) {
                     sh '''
                         set -eu
+                        set +x
 
                         echo "=== Verification de Docker Swarm ==="
 
@@ -673,16 +677,14 @@ EOF
 
                         echo "=== Connexion a Docker Hub ==="
 
-                        set +x
                         printf '%s' "$DOCKERHUB_PASSWORD" |
                             docker login \
-                                --username "$DOCKERHUB_USER" \
+                                --username "insafnemri" \
                                 --password-stdin
-                        set -x
 
                         echo "=== Recuperation de l'image publiee ==="
 
-                        docker pull "$DOCKER_IMAGE:$DOCKER_TAG"
+                        docker pull "${DOCKER_IMAGE}:${DOCKER_TAG}"
 
                         echo "=== Verification du service ==="
 
@@ -690,7 +692,7 @@ EOF
                             echo "Le service $SWARM_SERVICE existe deja."
 
                             docker service update \
-                                --image "$DOCKER_IMAGE:$DOCKER_TAG" \
+                                --image "${DOCKER_IMAGE}:${DOCKER_TAG}" \
                                 --with-registry-auth \
                                 "$SWARM_SERVICE"
                         else
@@ -701,7 +703,7 @@ EOF
                                 --publish published=8080,target=8080 \
                                 --replicas 2 \
                                 --with-registry-auth \
-                                "$DOCKER_IMAGE:$DOCKER_TAG"
+                                "$DOCKER_IMAGE:${DOCKER_TAG}"
                         fi
 
                         echo "=== Verification du deploiement ==="
@@ -716,7 +718,7 @@ EOF
                 }
             }
         }
-    }
+
 
     // ================================================================
     // POST : RESULTAT DU PIPELINE
