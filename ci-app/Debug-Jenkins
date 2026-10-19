@@ -1,0 +1,17 @@
+df -h /
+sudo systemctl status jenkins --no-pager
+sudo tail -n 60 /var/log/jenkins/jenkins.log
+sudo journalctl -u jenkins -n 60 --no-pager
+sudo apt-get clean
+sudo journalctl --vacuum-size=50M
+sudo du -xhd1 /var/lib/jenkins /var/cache/jenkins 2>/dev/null
+
+sudo systemctl restart jenkins
+sudo systemctl status jenkins --no-pager
+df -h /
+
+
+
+
+Si le numéro n’augmente toujours pas, exécute sur la VM Jenkins :
+sudo journalctl -u jenkins --since "5 minutes ago" --no-pager | grep -Ei "No space left|SEVERE|ERROR|queue.xml|nextBuildNumber"
