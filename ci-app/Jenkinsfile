@@ -502,40 +502,41 @@ EOF
             }
 
             steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'dockerhub-credentials',
-                        usernameVariable: 'insafnemri',
-                        passwordVariable: '123456789'
-                    )
-                ]) {
-                    sh '''
-                        set -eu
+                     
+withCredentials([
+    usernamePassword(
+        credentialsId: 'dockerhub-credentials',
+        usernameVariable: 'DOCKERHUB_USER',
+        passwordVariable: 'DOCKERHUB_PASSWORD'
+    )
+]) {
+    sh '''
+        set -eu
 
-                        echo "=== Verification de l'image versionnee ==="
-                        docker image inspect "${DOCKER_IMAGE}:${DOCKER_TAG}" >/dev/null
+        echo "=== Verification des images ==="
+        docker image inspect "${DOCKER_IMAGE}:${DOCKER_TAG}" >/dev/null
+        docker image inspect "${DOCKER_IMAGE}:latest" >/dev/null
 
-                        echo "=== Verification de l'image latest ==="
-                        docker image inspect "${DOCKER_IMAGE}:latest" >/dev/null
+        echo "=== Connexion a Docker Hub ==="
+        set +x
+        printf '%s' "$DOCKERHUB_PASSWORD" |
+            docker login \
+                --username "$DOCKERHUB_USER" \
+                --password-stdin
 
-                        echo "=== Connexion a Docker Hub ==="
-                        set +x
-                        printf '%s' "$DOCKERHUB_PASSWORD" |
-                            docker login \
-                                --username "$DOCKERHUB_USER" \
-                                --password-stdin
+        echo "=== Publication de l'image versionnee ==="
+        docker push "${DOCKER_IMAGE}:${DOCKER_TAG}"
 
-                        echo "=== Publication de l'image versionnee ==="
-                        docker push "${DOCKER_IMAGE}:${DOCKER_TAG}"
+        echo "=== Publication de latest ==="
+        docker push "${DOCKER_IMAGE}:latest"
 
-                        echo "=== Publication du tag latest ==="
-                        docker push "${DOCKER_IMAGE}:latest"
+        echo "=== Deconnexion ==="
+        docker logout
 
-                        echo "=== Deconnexion de Docker Hub ==="
-                        docker logout
+        echo "Publication Docker Hub terminee."
+    '''
+}
 
-                        echo "Publication Docker Hub terminee avec succes."
-                    '''
                 }
             }
         }
