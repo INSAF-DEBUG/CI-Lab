@@ -15,3 +15,52 @@ df -h /
 
 Si le numéro n’augmente toujours pas, exécute sur la VM Jenkins :
 sudo journalctl -u jenkins --since "5 minutes ago" --no-pager | grep -Ei "No space left|SEVERE|ERROR|queue.xml|nextBuildNumber"
+
+
+
+
+sudo journalctl -u jenkins --since "10:02:50" --no-pager -l | 
+grep -Ei "centos-build|docker-swarm|docker-trivy|SSHLauncher|launch failed|
+authentication|permission denied|timed out|exception"
+
+
+
+
+
+
+
+
+
+
+
+df -h /
+df -i /
+
+sudo ls -l /var/lib/jenkins/jobs/app-cd/nextBuildNumber
+
+sudo cat /var/lib/jenkins/jobs/app-cd/nextBuildNumber
+sudo journalctl -u jenkins -n 200 --no-pager -l | grep -Ei "No space left|
+queue.xml|nextBuildNumber|Job.saveNextBuildNumber|
+AccessDenied|Permission denied|SEVERE|ERROR|IOException"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
