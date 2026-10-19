@@ -736,6 +736,9 @@ EOF
       // ================================================================
     // POST : RESULTAT DU PIPELINE
     // ================================================================
+  
+    } // Fin du bloc stages
+
     post {
         success {
             echo 'Pipeline CI/CD termine avec succes.'
@@ -752,4 +755,4 @@ EOF
             echo "Fin du build #${BUILD_NUMBER}."
         }
     }
-}
+} // Fin du bloc pipeline
