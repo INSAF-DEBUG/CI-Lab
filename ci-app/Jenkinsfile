@@ -492,6 +492,7 @@ EOF
             }
         }
 
+       
         // ============================================================
         // STAGE 9 : PUBLICATION SUR DOCKER HUB
         // ============================================================
@@ -504,44 +505,41 @@ EOF
                 withCredentials([
                     usernamePassword(
                         credentialsId: 'dockerhub-credentials',
-                        usernameVariable: 'DOCKERHUB_USER',
-                        passwordVariable: 'DOCKERHUB_PASSWORD'
+                        usernameVariable: 'insafnemri',
+                        passwordVariable: '123456789'
                     )
                 ]) {
                     sh '''
                         set -eu
 
-                        echo "=== Verification des images locales ==="
+                        echo "=== Verification de l'image versionnee ==="
+                        docker image inspect "${DOCKER_IMAGE}:${DOCKER_TAG}" >/dev/null
 
-                        docker image inspect "$DOCKER_IMAGE:$DOCKER_TAG" \
-                            >/dev/null
+                        echo "=== Verification de l'image latest ==="
+                        docker image inspect "${DOCKER_IMAGE}:latest" >/dev/null
 
                         echo "=== Connexion a Docker Hub ==="
-
                         set +x
                         printf '%s' "$DOCKERHUB_PASSWORD" |
                             docker login \
                                 --username "$DOCKERHUB_USER" \
                                 --password-stdin
-                        set -x
 
-                        echo "=== Publication de la version ==="
-
-                        docker push "$DOCKER_IMAGE:$DOCKER_TAG"
+                        echo "=== Publication de l'image versionnee ==="
+                        docker push "${DOCKER_IMAGE}:${DOCKER_TAG}"
 
                         echo "=== Publication du tag latest ==="
+                        docker push "${DOCKER_IMAGE}:latest"
 
-                        docker push "$DOCKER_IMAGE:latest"
-
-                        echo "=== Deconnexion Docker Hub ==="
-
+                        echo "=== Deconnexion de Docker Hub ==="
                         docker logout
 
-                        echo "Publication Docker Hub terminee."
+                        echo "Publication Docker Hub terminee avec succes."
                     '''
                 }
             }
         }
+
 
         // ============================================================
         // STAGE 10 : DEPLOIEMENT DOCKER SWARM
