@@ -378,7 +378,7 @@ for item in root.iter():
 
                         echo "=== Generation du Dockerfile ==="
 
-                        cat > Dockerfile <<'EOF'
+                   cat > Dockerfile <<'EOF'
 FROM tomcat:9.0-jdk8-temurin
 
 USER root
@@ -396,21 +396,21 @@ EXPOSE 8080
 CMD ["catalina.sh", "run"]
 EOF
 
-                        echo "=== Construction de l'image ==="
+                       echo "=== Construction de l'image ==="
 
-                        docker build --no-cache \
-        -t insafnemri/ci-app:${BUILD_NUMBER} \
-        -t insafnemri/ci-app:latest
-                            .
+docker build --no-cache \
+    -t insafnemri/ci-app:${BUILD_NUMBER} \
+    -t insafnemri/ci-app:latest \
+    .
 
-                        echo "=== Verification de l'image ==="
+echo "=== Verification de l'image ==="
 
-                        docker image inspect "$DOCKER_IMAGE:$DOCKER_TAG" \
-                            --format 'Image={{.Id}}'
+docker image inspect "insafnemri/ci-app:${BUILD_NUMBER}" \
+    --format 'Image={{.Id}}'
 
-                        docker images "$DOCKER_IMAGE"
+docker images insafnemri/ci-app
 
-                        echo "Image Docker construite."
+echo "Image Docker construite."
                     '''
                 }
             }
