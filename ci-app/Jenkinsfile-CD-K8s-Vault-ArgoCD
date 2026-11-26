@@ -1,3 +1,4 @@
+
 pipeline {
 
     agent {
@@ -23,7 +24,9 @@ pipeline {
         HELM_DIR = 'helm/ci-app'
         DOCKER_IMAGE = 'insafnemri/ci-app'
         GIT_BRANCH = 'main'
-        ARGOCD_SERVER = 'ARGOCD_SERVER_A_CONFIGURER'
+
+        ARGOCD_SERVER = 'argocd-server.argocd.svc.cluster.local'
+
         VAULT_ADDR = 'http://vault.vault.svc.cluster.local:8200'
         VAULT_AUTH_PATH = 'kubernetes'
         VAULT_ROLE = 'ci-app'
@@ -74,7 +77,9 @@ pipeline {
                         --data "{\"role\":\"${VAULT_ROLE}\",\"jwt\":\"${JWT}\"}" \
                         "${VAULT_ADDR}/v1/auth/${VAULT_AUTH_PATH}/login")
 
-                    VAULT_TOKEN=$(printf '%s' "$RESPONSE" | sed -n 's/.*"client_token":"\([^"]*\)".*/\1/p')
+                    VAULT_TOKEN=$(printf '%s' "$RESPONSE" \
+                        | grep -o '"client_token":"[^"]*"' \
+                        | cut -d '"' -f4)
 
                     if [ -z "$VAULT_TOKEN" ]; then
                         echo "Échec de l'authentification Vault."
@@ -129,7 +134,7 @@ pipeline {
                         if git diff --cached --quiet; then
                             echo "Aucune modification Helm à publier."
                             exit 0
-    
+                        fi
 
                         git commit -m "Deploy ci-app image ${IMAGE_TAG}"
 
