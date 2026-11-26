@@ -153,7 +153,7 @@ pipeline {
                         set +x
                         set -eu
 
-                        ARGOCD_CLI="${WORKSPACE}/argocd"
+                        ARGOCD_CLI="${WORKSPACE}/argocd-cli"
 
                         echo "Téléchargement du client Argo CD v3.6.1..."
 
@@ -163,7 +163,7 @@ pipeline {
 
                         chmod +x "$ARGOCD_CLI"
 
-                        echo "Client Argo CD installé dans le workspace."
+                        echo "Vérification du client Argo CD..."
 
                         "$ARGOCD_CLI" version --client
 
@@ -195,7 +195,7 @@ pipeline {
         always {
             sh '''
                 rm -f "${WORKSPACE}/.vault-token"
-                rm -f "${WORKSPACE}/argocd"
+                rm -f "${WORKSPACE}/argocd-cli"
             '''
         }
     }
