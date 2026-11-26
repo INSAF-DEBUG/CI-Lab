@@ -1,4 +1,4 @@
-
+```groovy
 pipeline {
 
     agent {
@@ -47,55 +47,53 @@ pipeline {
                 }
             }
         }
-        
-stage('Authentification Vault') {
-    steps {
-        sh '''
-            set +x
-            set -eu
 
-            JWT_FILE="/var/run/secrets/kubernetes.io/serviceaccount/token"
-            TOKEN_FILE="${WORKSPACE}/.vault-token"
+        stage('Authentification Vault') {
+            steps {
+                sh '''
+                    set +x
+                    set -eu
 
-            if [ ! -r "$JWT_FILE" ]; then
-                echo "Token Kubernetes introuvable."
-                exit 1
-            fi
+                    JWT_FILE="/var/run/secrets/kubernetes.io/serviceaccount/token"
+                    TOKEN_FILE="${WORKSPACE}/.vault-token"
 
-            JWT=$(cat "$JWT_FILE")
+                    if [ ! -r "$JWT_FILE" ]; then
+                        echo "Token Kubernetes introuvable."
+                        exit 1
+                    fi
 
-            PAYLOAD=$(printf '{"role":"%s","jwt":"%s"}' \
-                "$VAULT_ROLE" "$JWT")
+                    JWT=$(cat "$JWT_FILE")
 
-            RESPONSE=$(curl -sS \
-                --header "Content-Type: application/json" \
-                --request POST \
-                --data-binary "$PAYLOAD" \
-                "${VAULT_ADDR}/v1/auth/${VAULT_AUTH_PATH}/login")
+                    PAYLOAD=$(printf '{"role":"%s","jwt":"%s"}' \
+                        "$VAULT_ROLE" "$JWT")
 
-            VAULT_TOKEN=$(printf '%s' "$RESPONSE" \
-                | grep -o '"client_token":"[^"]*"' \
-                | cut -d '"' -f4)
+                    RESPONSE=$(curl -sS \
+                        --header "Content-Type: application/json" \
+                        --request POST \
+                        --data-binary "$PAYLOAD" \
+                        "${VAULT_ADDR}/v1/auth/${VAULT_AUTH_PATH}/login")
 
-            unset JWT PAYLOAD
+                    VAULT_TOKEN=$(printf '%s' "$RESPONSE" \
+                        | grep -o '"client_token":"[^"]*"' \
+                        | cut -d '"' -f4)
 
-            if [ -z "$VAULT_TOKEN" ]; then
-                echo "Échec de l'authentification Vault."
-                printf '%s\\n' "$RESPONSE"
-                exit 1
-            fi
+                    unset JWT PAYLOAD
 
-            umask 077
-            printf '%s' "$VAULT_TOKEN" > "$TOKEN_FILE"
+                    if [ -z "$VAULT_TOKEN" ]; then
+                        echo "Échec de l'authentification Vault."
+                        printf '%s\\n' "$RESPONSE"
+                        exit 1
+                    fi
 
-            unset VAULT_TOKEN RESPONSE
+                    umask 077
+                    printf '%s' "$VAULT_TOKEN" > "$TOKEN_FILE"
 
-            echo "Authentification Vault réussie."
-        '''
-    }
-}
+                    unset VAULT_TOKEN RESPONSE
 
-      
+                    echo "Authentification Vault réussie."
+                '''
+            }
+        }
 
         stage('Mise à jour du tag Helm') {
             steps {
@@ -125,6 +123,7 @@ stage('Authentification Vault') {
                     passwordVariable: 'GIT_TOKEN'
                 )]) {
                     sh '''
+                        set +x
                         set -eu
 
                         git config user.name "Jenkins"
@@ -152,19 +151,40 @@ stage('Authentification Vault') {
                     variable: 'ARGOCD_AUTH_TOKEN'
                 )]) {
                     sh '''
+                        set +x
                         set -eu
 
-                        argocd app sync ci-app \
+                        ARGOCD_CLI="${WORKSPACE}/argocd"
+
+                        echo "Téléchargement du client Argo CD v3.6.1..."
+
+                        curl -fsSL \
+                            -o "$ARGOCD_CLI" \
+                            https://github.com/argoproj/argo-cd/releases/download/v3.6.1/argocd-linux-amd64
+
+                        chmod +x "$ARGOCD_CLI"
+
+                        echo "Client Argo CD installé dans le workspace."
+
+                        "$ARGOCD_CLI" version --client
+
+                        echo "Synchronisation de l'application ci-app..."
+
+                        "$ARGOCD_CLI" app sync ci-app \
                             --server "$ARGOCD_SERVER" \
                             --auth-token "$ARGOCD_AUTH_TOKEN" \
                             --insecure
 
-                        argocd app wait ci-app \
+                        echo "Attente de la synchronisation et de l'état Healthy..."
+
+                        "$ARGOCD_CLI" app wait ci-app \
                             --server "$ARGOCD_SERVER" \
                             --auth-token "$ARGOCD_AUTH_TOKEN" \
                             --health \
                             --sync \
                             --insecure
+
+                        echo "Synchronisation Argo CD réussie."
                     '''
                 }
             }
@@ -176,7 +196,9 @@ stage('Authentification Vault') {
         always {
             sh '''
                 rm -f "${WORKSPACE}/.vault-token"
+                rm -f "${WORKSPACE}/argocd"
             '''
         }
     }
 }
+```
