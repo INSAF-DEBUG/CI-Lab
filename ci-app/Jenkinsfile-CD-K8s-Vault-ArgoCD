@@ -10,19 +10,14 @@ pipeline {
         disableConcurrentBuilds()
     }
 
-    parameters {
-        string(
-            name: 'IMAGE_TAG',
-            defaultValue: '',
-            description: 'Numéro du build CI ayant publié l’image Docker'
-        )
-    }
-
     environment {
         APP_NAME = 'ci-app'
         APP_DIR = 'ci-app'
         HELM_DIR = 'helm/ci-app'
+
         DOCKER_IMAGE = 'insafnemri/ci-app'
+        IMAGE_TAG = 'latest'
+
         GIT_BRANCH = 'main'
 
         ARGOCD_SERVER = 'argocd-server.argocd.svc.cluster.local'
@@ -44,15 +39,11 @@ pipeline {
         stage('Validation du tag Docker') {
             steps {
                 script {
-                    if (!params.IMAGE_TAG?.trim()) {
-                        error("Le paramètre IMAGE_TAG est obligatoire.")
-                    }
-
-                    if (!(params.IMAGE_TAG ==~ /^[A-Za-z0-9_.-]+$/)) {
+                    if (!(env.IMAGE_TAG ==~ /^[A-Za-z0-9_.-]+$/)) {
                         error("Le format du tag Docker est invalide.")
                     }
 
-                    echo "Image à déployer : ${DOCKER_IMAGE}:${params.IMAGE_TAG}"
+                    echo "Image à déployer : ${DOCKER_IMAGE}:${IMAGE_TAG}"
                 }
             }
         }
