@@ -47,45 +47,55 @@ pipeline {
                 }
             }
         }
+        
+stage('Authentification Vault') {
+    steps {
+        sh '''
+            set +x
+            set -eu
 
-        stage('Authentification Vault') {
-            steps {
-                sh '''
-                    set -eu
+            JWT_FILE="/var/run/secrets/kubernetes.io/serviceaccount/token"
+            TOKEN_FILE="${WORKSPACE}/.vault-token"
 
-                    JWT_FILE="/var/run/secrets/kubernetes.io/serviceaccount/token"
-                    TOKEN_FILE="${WORKSPACE}/.vault-token"
+            if [ ! -r "$JWT_FILE" ]; then
+                echo "Token Kubernetes introuvable."
+                exit 1
+            fi
 
-                    if [ ! -r "$JWT_FILE" ]; then
-                        echo "Token du ServiceAccount Kubernetes introuvable."
-                        exit 1
-                    fi
+            JWT=$(cat "$JWT_FILE")
 
-                    JWT=$(cat "$JWT_FILE")
+            PAYLOAD=$(printf '{"role":"%s","jwt":"%s"}' \
+                "$VAULT_ROLE" "$JWT")
 
-                    RESPONSE=$(curl -sS \
-                        --request POST \
-                        --data "{\"role\":\"${VAULT_ROLE}\",\"jwt\":\"${JWT}\"}" \
-                        "${VAULT_ADDR}/v1/auth/${VAULT_AUTH_PATH}/login")
+            RESPONSE=$(curl -sS \
+                --header "Content-Type: application/json" \
+                --request POST \
+                --data-binary "$PAYLOAD" \
+                "${VAULT_ADDR}/v1/auth/${VAULT_AUTH_PATH}/login")
 
-                    VAULT_TOKEN=$(printf '%s' "$RESPONSE" \
-                        | grep -o '"client_token":"[^"]*"' \
-                        | cut -d '"' -f4)
+            VAULT_TOKEN=$(printf '%s' "$RESPONSE" \
+                | grep -o '"client_token":"[^"]*"' \
+                | cut -d '"' -f4)
 
-                    if [ -z "$VAULT_TOKEN" ]; then
-                        echo "Échec de l'authentification Vault."
-                        exit 1
-                    fi
+            unset JWT PAYLOAD
 
-                    umask 077
-                    printf '%s' "$VAULT_TOKEN" > "$TOKEN_FILE"
+            if [ -z "$VAULT_TOKEN" ]; then
+                echo "Échec de l'authentification Vault."
+                printf '%s\\n' "$RESPONSE"
+                exit 1
+            fi
 
-                    unset JWT VAULT_TOKEN RESPONSE
+            umask 077
+            printf '%s' "$VAULT_TOKEN" > "$TOKEN_FILE"
 
-                    echo "Authentification Vault réussie. Token conservé temporairement."
-                '''
-            }
-        }
+            unset VAULT_TOKEN RESPONSE
+
+            echo "Authentification Vault réussie."
+        '''
+    }
+}
+
+      
 
         stage('Mise à jour du tag Helm') {
             steps {
