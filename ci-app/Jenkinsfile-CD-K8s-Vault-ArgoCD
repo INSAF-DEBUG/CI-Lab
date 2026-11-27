@@ -7,125 +7,135 @@ pipeline {
     options {
         timestamps()
         disableConcurrentBuilds()
+        skipDefaultCheckout(true)
     }
 
     environment {
-        APP_NAME = 'ci-app'
-        APP_DIR = 'ci-app'
-        HELM_DIR = 'helm/ci-app'
+        APP_NAME       = 'ci-app'
+        HELM_DIR       = 'helm/ci-app'
+        DOCKER_IMAGE   = 'insafnemri/ci-app'
+        IMAGE_TAG      = 'latest'
+        TARGET_BRANCH  = 'main'
 
-        DOCKER_IMAGE = 'insafnemri/ci-app'
-        IMAGE_TAG = 'latest'
+        ARGOCD_SERVER  = 'argocd-server.argocd.svc.cluster.local'
 
-        GIT_BRANCH = 'main'
-        GIT_REPOSITORY = 'https://github.com/INSAF-DEBUG/CI-Lab.git'
-
-        ARGOCD_SERVER = 'argocd-server.argocd.svc.cluster.local'
-
-        VAULT_ADDR = 'http://vault.vault.svc.cluster.local:8200'
+        VAULT_ADDR      = 'http://vault.vault.svc.cluster.local:8200'
         VAULT_AUTH_PATH = 'kubernetes'
-        VAULT_ROLE = 'ci-app'
+        VAULT_ROLE      = 'ci-app'
     }
 
     stages {
 
         stage('Checkout') {
             steps {
-                echo 'Recuperation du projet GitHub...'
-
                 checkout scm
 
                 sh '''
-                    set -eu
-
-                    echo "Branche : ${GIT_BRANCH}"
+                    echo "Récupération du dépôt terminée."
+                    echo "Branche : $(git branch --show-current)"
                     echo "Commit : $(git rev-parse --short HEAD)"
-                    echo "Workspace : ${WORKSPACE}"
                 '''
             }
         }
 
         stage('Validation de l’image Docker') {
             steps {
-                echo 'Validation de l’image Docker...'
-
                 sh '''
                     set -eu
 
-                    echo "Image : ${DOCKER_IMAGE}:${IMAGE_TAG}"
+                    echo "Image Docker : ${DOCKER_IMAGE}:${IMAGE_TAG}"
 
-                    if ! printf '%s' "${IMAGE_TAG}" | grep -Eq '^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$'; then
-                        echo "ERREUR : tag Docker invalide."
+                    if ! printf '%s' "$IMAGE_TAG" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'; then
+                        echo "Tag Docker invalide."
                         exit 1
                     fi
 
-                    echo "Validation du tag reussie."
+                    echo "Validation de l'image réussie."
                 '''
             }
         }
 
         stage('Authentification Vault') {
             steps {
-                echo 'Authentification Kubernetes aupres de Vault...'
-
                 sh '''
                     set -eu
-                    set +x
 
                     JWT_FILE="/var/run/secrets/kubernetes.io/serviceaccount/token"
-
-                    if [ ! -f "$JWT_FILE" ]; then
-                        echo "ERREUR : token Kubernetes introuvable."
-                        exit 1
-                    fi
-
-                    K8S_JWT=$(cat "$JWT_FILE")
-
-                    RESPONSE=$(curl -sS --fail \
-                        --request POST \
-                        --header "Content-Type: application/json" \
-                        --data "{\"role\":\"${VAULT_ROLE}\",\"jwt\":\"${K8S_JWT}\"}" \
-                        "${VAULT_ADDR}/v1/auth/${VAULT_AUTH_PATH}/login")
-
-                    VAULT_TOKEN=$(printf '%s' "$RESPONSE" | \
-                        awk -F'"' '{for(i=1;i<=NF;i++) if($i=="client_token"){print $(i+2); exit}}')
-
-                    unset K8S_JWT RESPONSE
-
-                    if [ -z "$VAULT_TOKEN" ]; then
-                        echo "ERREUR : authentification Vault echouee."
-                        exit 1
-                    fi
+                    TOKEN_FILE="${WORKSPACE}/.vault-token"
+                    REQUEST_FILE="${WORKSPACE}/.vault-request.json"
+                    RESPONSE_FILE="${WORKSPACE}/.vault-response.json"
 
                     umask 077
-                    printf '%s' "$VAULT_TOKEN" > "${WORKSPACE}/.vault-token"
+                    trap 'rm -f "$REQUEST_FILE" "$RESPONSE_FILE"' EXIT
 
-                    unset VAULT_TOKEN
+                    if [ ! -r "$JWT_FILE" ]; then
+                        echo "Token du ServiceAccount Kubernetes introuvable."
+                        exit 1
+                    fi
 
-                    echo "Authentification Vault reussie."
+                    JWT=$(cat "$JWT_FILE")
+
+                    printf '{"role":"%s","jwt":"%s"}' \
+                        "$VAULT_ROLE" "$JWT" > "$REQUEST_FILE"
+
+                    echo "Authentification auprès de Vault..."
+
+                    HTTP_CODE=$(curl -sS \
+                        --output "$RESPONSE_FILE" \
+                        --write-out '%{http_code}' \
+                        --request POST \
+                        --header "Content-Type: application/json" \
+                        --data-binary "@${REQUEST_FILE}" \
+                        "${VAULT_ADDR}/v1/auth/${VAULT_AUTH_PATH}/login")
+
+                    if [ "$HTTP_CODE" != "200" ]; then
+                        echo "Échec de l'authentification Vault."
+                        echo "Code HTTP : $HTTP_CODE"
+                        echo "Réponse Vault :"
+                        cat "$RESPONSE_FILE"
+                        exit 1
+                    fi
+
+                    VAULT_TOKEN=$(sed -n \
+                        's/.*"client_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+                        "$RESPONSE_FILE")
+
+                    if [ -z "$VAULT_TOKEN" ]; then
+                        echo "Impossible de récupérer le token Vault."
+                        cat "$RESPONSE_FILE"
+                        exit 1
+                    fi
+
+                    printf '%s' "$VAULT_TOKEN" > "$TOKEN_FILE"
+                    chmod 600 "$TOKEN_FILE"
+
+                    unset JWT VAULT_TOKEN
+
+                    echo "Authentification Vault réussie."
+                    echo "Token conservé temporairement."
                 '''
             }
         }
 
-        stage('Mise a jour Helm') {
+        stage('Mise à jour du tag Helm') {
             steps {
-                echo 'Mise a jour du tag Docker dans Helm...'
-
                 sh '''
                     set -eu
 
                     VALUES_FILE="${HELM_DIR}/values.yaml"
 
                     if [ ! -f "$VALUES_FILE" ]; then
-                        echo "ERREUR : fichier values.yaml introuvable."
+                        echo "Fichier values.yaml introuvable."
                         exit 1
                     fi
 
+                    echo "Mise à jour du tag Docker dans Helm..."
+
                     sed -i -E \
-                        "s/^([[:space:]]*tag:[[:space:]]*).*/\\1\\"${IMAGE_TAG}\\"/" \
+                        "s/^([[:space:]]*tag:).*/\\1 ${IMAGE_TAG}/" \
                         "$VALUES_FILE"
 
-                    echo "Configuration Helm :"
+                    echo "Tag configuré :"
                     grep -n 'tag:' "$VALUES_FILE"
                 '''
             }
@@ -133,39 +143,38 @@ pipeline {
 
         stage('Commit et Push GitHub') {
             steps {
-                echo 'Publication des modifications Helm sur GitHub...'
-
                 withCredentials([
                     usernamePassword(
                         credentialsId: 'github-credentials',
                         usernameVariable: 'GIT_USERNAME',
-                        passwordVariable: 'GIT_TOKEN'
+                        passwordVariable: 'GIT_PASSWORD'
                     )
                 ]) {
                     sh '''
                         set -eu
                         set +x
 
-                        git config user.name "Jenkins"
+                        git config user.name "Jenkins CI/CD"
                         git config user.email "jenkins@localhost"
 
-                        git add "${HELM_DIR}/values.yaml"
+                        git add helm/ci-app/values.yaml
 
                         if git diff --cached --quiet; then
-                            echo "Aucune modification Helm a publier."
-                        else
-                            git commit -m "Update ci-app image tag to ${IMAGE_TAG}"
-
-                            AUTH=$(printf '%s' \
-                                "${GIT_USERNAME}:${GIT_TOKEN}" | base64 | tr -d '\\n')
-
-                            git -c http.extraheader="AUTHORIZATION: basic ${AUTH}" \
-                                push origin "HEAD:${GIT_BRANCH}"
-
-                            unset AUTH
-
-                            echo "Publication GitHub reussie."
+                            echo "Aucune modification Helm à publier."
+                            exit 0
                         fi
+
+                        git commit -m "Deploy ci-app image ${IMAGE_TAG}"
+
+                        AUTH_HEADER=$(printf '%s:%s' \
+                            "$GIT_USERNAME" "$GIT_PASSWORD" | base64 | tr -d '\\n')
+
+                        git -c http.extraheader="AUTHORIZATION: basic ${AUTH_HEADER}" \
+                            push origin "HEAD:${TARGET_BRANCH}"
+
+                        unset AUTH_HEADER GIT_PASSWORD
+
+                        echo "Publication GitHub réussie."
                     '''
                 }
             }
@@ -173,53 +182,42 @@ pipeline {
 
         stage('Synchronisation Argo CD') {
             steps {
-                echo 'Synchronisation de ci-app avec Argo CD...'
-
                 withCredentials([
                     string(
                         credentialsId: 'argocd-token',
                         variable: 'ARGOCD_AUTH_TOKEN'
                     )
                 ]) {
-
                     container('argocd') {
-
                         sh '''
                             set -eu
                             set +x
 
-                            echo "Verification du client Argo CD..."
-
+                            echo "Vérification du client Argo CD..."
                             argocd version --client
 
-                            echo "Verification de l'application..."
-
-                            argocd app get "${APP_NAME}" \
-                                --server "${ARGOCD_SERVER}" \
-                                --auth-token "${ARGOCD_AUTH_TOKEN}" \
-                                --grpc-web \
+                            echo "Vérification de l'application..."
+                            argocd app get "$APP_NAME" \
+                                --server "$ARGOCD_SERVER" \
+                                --auth-token "$ARGOCD_AUTH_TOKEN" \
                                 --insecure
 
                             echo "Synchronisation de l'application..."
-
-                            argocd app sync "${APP_NAME}" \
-                                --server "${ARGOCD_SERVER}" \
-                                --auth-token "${ARGOCD_AUTH_TOKEN}" \
-                                --grpc-web \
+                            argocd app sync "$APP_NAME" \
+                                --server "$ARGOCD_SERVER" \
+                                --auth-token "$ARGOCD_AUTH_TOKEN" \
                                 --insecure
 
-                            echo "Attente de la synchronisation et de la disponibilite..."
-
-                            argocd app wait "${APP_NAME}" \
-                                --server "${ARGOCD_SERVER}" \
-                                --auth-token "${ARGOCD_AUTH_TOKEN}" \
-                                --grpc-web \
+                            echo "Attente de l'état Healthy et Synced..."
+                            argocd app wait "$APP_NAME" \
+                                --server "$ARGOCD_SERVER" \
+                                --auth-token "$ARGOCD_AUTH_TOKEN" \
                                 --insecure \
                                 --sync \
                                 --health \
                                 --timeout 300
 
-                            echo "Synchronisation Argo CD reussie."
+                            echo "Déploiement Kubernetes terminé."
                         '''
                     }
                 }
@@ -228,37 +226,23 @@ pipeline {
     }
 
     post {
+        always {
+            sh '''
+                rm -f \
+                    "${WORKSPACE}/.vault-token" \
+                    "${WORKSPACE}/.vault-request.json" \
+                    "${WORKSPACE}/.vault-response.json"
+
+                echo "Nettoyage des fichiers temporaires terminé."
+            '''
+        }
 
         success {
-            echo '''
-            ==========================================
-                  PIPELINE CD TERMINE AVEC SUCCES
-            ==========================================
-            Application : ci-app
-            Image       : insafnemri/ci-app:latest
-            Deploiement : Kubernetes
-            GitOps      : Argo CD
-            ==========================================
-            '''
+            echo 'Pipeline CD Kubernetes terminé avec succès.'
         }
 
         failure {
-            echo '''
-            ==========================================
-                    ECHEC DU PIPELINE CD
-            ==========================================
-            Consultez les logs Jenkins pour identifier
-            l'etape qui a echoue.
-            ==========================================
-            '''
-        }
-
-        always {
-            sh '''
-                rm -f "${WORKSPACE}/.vault-token"
-            '''
-
-            echo 'Nettoyage termine.'
+            echo 'Échec du pipeline CD Kubernetes. Consulter les logs.'
         }
     }
 }
