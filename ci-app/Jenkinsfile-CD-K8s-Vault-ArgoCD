@@ -31,6 +31,8 @@ pipeline {
                 checkout scm
 
                 sh '''
+                    set -eu
+
                     echo "Récupération du dépôt terminée."
                     echo "Branche : $(git branch --show-current)"
                     echo "Commit : $(git rev-parse --short HEAD)"
@@ -75,18 +77,11 @@ pipeline {
 
                     JWT=$(cat "$JWT_FILE")
 
-                    printf '{"role":"%s","jwt":"%s"}' \
-                        "$VAULT_ROLE" "$JWT" > "$REQUEST_FILE"
+                    printf '{"role":"%s","jwt":"%s"}' "$VAULT_ROLE" "$JWT" > "$REQUEST_FILE"
 
                     echo "Authentification auprès de Vault..."
 
-                    HTTP_CODE=$(curl -sS \
-                        --output "$RESPONSE_FILE" \
-                        --write-out '%{http_code}' \
-                        --request POST \
-                        --header "Content-Type: application/json" \
-                        --data-binary "@${REQUEST_FILE}" \
-                        "${VAULT_ADDR}/v1/auth/${VAULT_AUTH_PATH}/login")
+                    HTTP_CODE=$(curl -sS --output "$RESPONSE_FILE" --write-out '%{http_code}' --request POST --header "Content-Type: application/json" --data-binary "@${REQUEST_FILE}" "${VAULT_ADDR}/v1/auth/${VAULT_AUTH_PATH}/login")
 
                     if [ "$HTTP_CODE" != "200" ]; then
                         echo "Échec de l'authentification Vault."
@@ -96,13 +91,10 @@ pipeline {
                         exit 1
                     fi
 
-                    VAULT_TOKEN=$(sed -n \
-                        's/.*"client_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-                        "$RESPONSE_FILE")
+                    VAULT_TOKEN=$(grep -o '"client_token"[[:space:]]*:[[:space:]]*"[^"]*"' "$RESPONSE_FILE" | cut -d '"' -f4)
 
                     if [ -z "$VAULT_TOKEN" ]; then
                         echo "Impossible de récupérer le token Vault."
-                        cat "$RESPONSE_FILE"
                         exit 1
                     fi
 
@@ -131,9 +123,7 @@ pipeline {
 
                     echo "Mise à jour du tag Docker dans Helm..."
 
-                    sed -i -E \
-                        "s/^([[:space:]]*tag:).*/\\1 ${IMAGE_TAG}/" \
-                        "$VALUES_FILE"
+                    sed -i -E "s|^[[:space:]]*tag:.*|  tag: ${IMAGE_TAG}|" "$VALUES_FILE"
 
                     echo "Tag configuré :"
                     grep -n 'tag:' "$VALUES_FILE"
@@ -161,20 +151,19 @@ pipeline {
 
                         if git diff --cached --quiet; then
                             echo "Aucune modification Helm à publier."
-                            exit 0
+                        else
+                            git commit -m "Deploy ci-app image ${IMAGE_TAG}"
+
+                            AUTH_HEADER=$(printf '%s:%s' "$GIT_USERNAME" "$GIT_PASSWORD" | base64 -w 0)
+
+                            git -c http.extraheader="AUTHORIZATION: basic ${AUTH_HEADER}" push origin "HEAD:${TARGET_BRANCH}"
+
+                            unset AUTH_HEADER
+
+                            echo "Publication GitHub réussie."
                         fi
 
-                        git commit -m "Deploy ci-app image ${IMAGE_TAG}"
-
-                        AUTH_HEADER=$(printf '%s:%s' \
-                            "$GIT_USERNAME" "$GIT_PASSWORD" | base64 | tr -d '\\n')
-
-                        git -c http.extraheader="AUTHORIZATION: basic ${AUTH_HEADER}" \
-                            push origin "HEAD:${TARGET_BRANCH}"
-
-                        unset AUTH_HEADER GIT_PASSWORD
-
-                        echo "Publication GitHub réussie."
+                        unset GIT_PASSWORD
                     '''
                 }
             }
@@ -194,28 +183,20 @@ pipeline {
                             set +x
 
                             echo "Vérification du client Argo CD..."
+
                             argocd version --client
 
                             echo "Vérification de l'application..."
-                            argocd app get "$APP_NAME" \
-                                --server "$ARGOCD_SERVER" \
-                                --auth-token "$ARGOCD_AUTH_TOKEN" \
-                                --insecure
+
+                            argocd app get "$APP_NAME" --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_AUTH_TOKEN" --insecure
 
                             echo "Synchronisation de l'application..."
-                            argocd app sync "$APP_NAME" \
-                                --server "$ARGOCD_SERVER" \
-                                --auth-token "$ARGOCD_AUTH_TOKEN" \
-                                --insecure
+
+                            argocd app sync "$APP_NAME" --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_AUTH_TOKEN" --insecure
 
                             echo "Attente de l'état Healthy et Synced..."
-                            argocd app wait "$APP_NAME" \
-                                --server "$ARGOCD_SERVER" \
-                                --auth-token "$ARGOCD_AUTH_TOKEN" \
-                                --insecure \
-                                --sync \
-                                --health \
-                                --timeout 300
+
+                            argocd app wait "$APP_NAME" --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_AUTH_TOKEN" --insecure --sync --health --timeout 300
 
                             echo "Déploiement Kubernetes terminé."
                         '''
@@ -228,10 +209,9 @@ pipeline {
     post {
         always {
             sh '''
-                rm -f \
-                    "${WORKSPACE}/.vault-token" \
-                    "${WORKSPACE}/.vault-request.json" \
-                    "${WORKSPACE}/.vault-response.json"
+                rm -f "${WORKSPACE}/.vault-token"
+                rm -f "${WORKSPACE}/.vault-request.json"
+                rm -f "${WORKSPACE}/.vault-response.json"
 
                 echo "Nettoyage des fichiers temporaires terminé."
             '''
