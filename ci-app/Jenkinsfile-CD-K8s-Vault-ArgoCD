@@ -1,3 +1,4 @@
+```groovy
 pipeline {
 
     agent {
@@ -10,23 +11,23 @@ pipeline {
     }
 
     environment {
-        APP_NAME       = 'ci-app'
-        APP_DIR        = 'ci-app'
-        HELM_DIR       = 'helm/ci-app'
+        APP_NAME        = 'ci-app'
+        APP_DIR         = 'ci-app'
+        HELM_DIR        = 'helm/ci-app'
 
-        DOCKER_IMAGE   = 'insafnemri/ci-app'
-        IMAGE_TAG      = 'latest'
+        DOCKER_IMAGE    = 'insafnemri/ci-app'
+        IMAGE_TAG       = 'latest'
 
-        GIT_BRANCH     = 'main'
-        GIT_REPO       = 'https://github.com/INSAF-DEBUG/CI-Lab.git'
+        GIT_BRANCH      = 'main'
+        GIT_REPO        = 'https://github.com/INSAF-DEBUG/CI-Lab.git'
 
-        VAULT_ADDR     = 'http://vault.vault.svc.cluster.local:8200'
+        VAULT_ADDR      = 'http://vault.vault.svc.cluster.local:8200'
         VAULT_AUTH_PATH = 'kubernetes'
-        VAULT_ROLE     = 'ci-app'
-        VAULT_SECRET   = 'secret/data/ci-app'
+        VAULT_ROLE      = 'ci-app'
+        VAULT_SECRET    = 'secret/data/ci-app'
 
-        ARGOCD_SERVER  = 'argocd-server.argocd.svc.cluster.local'
-        ARGOCD_VERSION = 'v3.6.1'
+        ARGOCD_SERVER   = 'argocd-server.argocd.svc.cluster.local'
+        ARGOCD_VERSION  = 'v3.6.1'
     }
 
     stages {
@@ -200,15 +201,26 @@ pipeline {
                         set -eu
                         set +x
 
+                        umask 077
+
                         ARGOCD_CLI="/tmp/argocd-cli-${BUILD_NUMBER}"
+
+                        echo "Vérification du token Argo CD..."
+
+                        test -n "$ARGOCD_AUTH_TOKEN"
 
                         echo "Téléchargement du client Argo CD ${ARGOCD_VERSION}..."
 
-                        curl --http1.1 -fL \
+                        curl --http1.1 \
+                            --fail \
+                            --location \
+                            --silent \
+                            --show-error \
                             --retry 5 \
+                            --retry-all-errors \
                             --retry-delay 3 \
                             --connect-timeout 30 \
-                            --max-time 600 \
+                            --max-time 900 \
                             -o "$ARGOCD_CLI" \
                             "https://github.com/argoproj/argo-cd/releases/download/${ARGOCD_VERSION}/argocd-linux-amd64"
 
@@ -218,25 +230,37 @@ pipeline {
 
                         "$ARGOCD_CLI" version --client
 
-                        echo "Connexion au serveur Argo CD..."
+                        echo "Connexion au serveur Argo CD par token..."
 
-                        "$ARGOCD_CLI" login "$ARGOCD_SERVER" \
-                            --auth-token "$ARGOCD_AUTH_TOKEN" \
-                            --insecure \
-                            --grpc-web
+                        echo "Serveur : $ARGOCD_SERVER"
 
                         echo "Vérification de l'application..."
 
-                        "$ARGOCD_CLI" app get "$APP_NAME"
+                        "$ARGOCD_CLI" \
+                            --server "$ARGOCD_SERVER" \
+                            --auth-token "$ARGOCD_AUTH_TOKEN" \
+                            --insecure \
+                            --grpc-web \
+                            app get "$APP_NAME"
 
                         echo "Synchronisation de l'application..."
 
-                        "$ARGOCD_CLI" app sync "$APP_NAME" \
+                        "$ARGOCD_CLI" \
+                            --server "$ARGOCD_SERVER" \
+                            --auth-token "$ARGOCD_AUTH_TOKEN" \
+                            --insecure \
+                            --grpc-web \
+                            app sync "$APP_NAME" \
                             --timeout 300
 
                         echo "Attente de l'état Healthy..."
 
-                        "$ARGOCD_CLI" app wait "$APP_NAME" \
+                        "$ARGOCD_CLI" \
+                            --server "$ARGOCD_SERVER" \
+                            --auth-token "$ARGOCD_AUTH_TOKEN" \
+                            --insecure \
+                            --grpc-web \
+                            app wait "$APP_NAME" \
                             --health \
                             --sync \
                             --timeout 300
@@ -251,6 +275,7 @@ pipeline {
     }
 
     post {
+
         success {
             echo 'Pipeline CD Kubernetes terminé avec succès.'
             echo 'Application ci-app synchronisée par Argo CD.'
@@ -276,3 +301,4 @@ pipeline {
         }
     }
 }
+```
