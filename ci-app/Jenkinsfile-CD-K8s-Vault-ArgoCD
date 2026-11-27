@@ -96,13 +96,10 @@ pipeline {
                         exit 1
                     fi
 
-                    VAULT_TOKEN=$(sed -n \
-                        's/.*"client_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-                        "$RESPONSE_FILE")
+                    VAULT_TOKEN=$(grep -o '"client_token"[[:space:]]*:[[:space:]]*"[^"]*"' "$RESPONSE_FILE" | cut -d '"' -f4)
 
                     if [ -z "$VAULT_TOKEN" ]; then
                         echo "Impossible de récupérer le token Vault."
-                        cat "$RESPONSE_FILE"
                         exit 1
                     fi
 
@@ -194,21 +191,25 @@ pipeline {
                             set +x
 
                             echo "Vérification du client Argo CD..."
+
                             argocd version --client
 
                             echo "Vérification de l'application..."
+
                             argocd app get "$APP_NAME" \
                                 --server "$ARGOCD_SERVER" \
                                 --auth-token "$ARGOCD_AUTH_TOKEN" \
                                 --insecure
 
                             echo "Synchronisation de l'application..."
+
                             argocd app sync "$APP_NAME" \
                                 --server "$ARGOCD_SERVER" \
                                 --auth-token "$ARGOCD_AUTH_TOKEN" \
                                 --insecure
 
                             echo "Attente de l'état Healthy et Synced..."
+
                             argocd app wait "$APP_NAME" \
                                 --server "$ARGOCD_SERVER" \
                                 --auth-token "$ARGOCD_AUTH_TOKEN" \
