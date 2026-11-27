@@ -61,6 +61,8 @@ pipeline {
             steps {
                 sh '''
                     set -eu
+                    set +x
+
 
                     JWT_FILE="/var/run/secrets/kubernetes.io/serviceaccount/token"
                     TOKEN_FILE="${WORKSPACE}/.vault-token"
