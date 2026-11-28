@@ -1,0 +1,89 @@
+
+#!/bin/bash
+set -Eeuo pipefail
+
+# ==========================================
+# Exécution des tests de charge Apache JMeter
+# Projet : CI-Lab
+# ==========================================
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Chargement de la configuration
+if [ ! -f "${SCRIPT_DIR}/jmeter.conf" ]; then
+    echo "ERREUR : jmeter.conf introuvable."
+    exit 1
+fi
+
+source "${SCRIPT_DIR}/jmeter.conf"
+
+echo "=========================================="
+echo "       EXECUTION DES TESTS JMETER"
+echo "=========================================="
+
+# Vérification de l'utilisateur
+if [ "$(id -un)" != "${JMETER_USER}" ]; then
+    echo "ERREUR : Ce script doit être exécuté avec l'utilisateur ${JMETER_USER}."
+    echo "Commande : sudo -u ${JMETER_USER} bash $0"
+    exit 1
+fi
+
+# Vérification de JMeter
+if [ ! -x "${JMETER_BIN}" ]; then
+    echo "ERREUR : JMeter n'est pas installé dans ${JMETER_HOME}."
+    exit 1
+fi
+
+# Vérification du scénario
+if [ ! -f "${JMETER_SCENARIO}" ]; then
+    echo "ERREUR : Scénario JMeter introuvable : ${JMETER_SCENARIO}"
+    exit 1
+fi
+
+# Vérification des répertoires
+mkdir -p "${JMETER_RESULTS}" "${JMETER_REPORTS}"
+
+# Création d'un nom de rapport unique
+TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+RESULT_FILE="${JMETER_RESULTS}/ci-app-results-${TIMESTAMP}.jtl"
+LOG_FILE="${JMETER_RESULTS}/ci-app-jmeter-${TIMESTAMP}.log"
+REPORT_DIR="${JMETER_REPORTS}/ci-app-${TIMESTAMP}"
+
+echo "Scénario : ${JMETER_SCENARIO}"
+echo "Résultats : ${RESULT_FILE}"
+echo "Journal : ${LOG_FILE}"
+echo "Rapport HTML : ${REPORT_DIR}"
+
+# Exécution en mode non graphique
+echo
+echo "=== Démarrage du test de charge ==="
+
+if "${JMETER_BIN}" \
+    -n \
+    -t "${JMETER_SCENARIO}" \
+    -l "${RESULT_FILE}" \
+    -j "${LOG_FILE}"; then
+
+    echo
+    echo "=== Génération du rapport HTML ==="
+
+    "${JMETER_BIN}" \
+        -g "${RESULT_FILE}" \
+        -o "${REPORT_DIR}" \
+        -j "${JMETER_RESULTS}/report-${TIMESTAMP}.log"
+
+    echo
+    echo "=========================================="
+    echo "       TEST JMETER TERMINE"
+    echo "=========================================="
+    echo "Résultats : ${RESULT_FILE}"
+    echo "Journal : ${LOG_FILE}"
+    echo "Rapport : ${REPORT_DIR}/index.html"
+    echo "=========================================="
+
+else
+    echo
+    echo "ERREUR : L'exécution du test JMeter a échoué."
+    echo "Consulte le journal : ${LOG_FILE}"
+    exit 1
+fi
