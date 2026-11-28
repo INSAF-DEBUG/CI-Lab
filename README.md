@@ -50,96 +50,346 @@ Mise en place d'une chaîne d'intégration continue pour automatiser la construc
 
 
 ---
-
 # 1. Présentation
 
-Ce projet consiste à mettre en place une chaîne d'intégration continue permettant d'automatiser les principales étapes du cycle de développement d'une application Java.
+Ce projet consiste à concevoir et à mettre en place un laboratoire DevOps permettant d'automatiser et de mettre en œuvre les principales étapes du cycle de vie d'une application Java, depuis la gestion du code source jusqu'à son déploiement et à l'évaluation de ses performances.
 
-L'objectif du laboratoire est de mettre en œuvre une chaîne complète permettant de passer du développement du code source à la génération et à la publication d'un artefact Maven.
+L'objectif est de mettre en pratique les outils et les technologies utilisés dans les environnements DevOps, notamment l'intégration continue (CI), la conteneurisation, l'analyse de sécurité, l'orchestration, le déploiement continu (CD) et les tests de charge.
 
-## Chaîne globale
+Le laboratoire est construit sur plusieurs machines virtuelles VMware afin de répartir les différents services et de reproduire une infrastructure DevOps distribuée.
 
-    Développement
-          │
-          ▼
-         Git
-          │
-          ▼
-       GitHub
-          │
-          ▼
-       Jenkins
-          │
-          ▼
-        Maven
-          │
-          ├──────────────► SonarQube
-          │
-          ▼
-         JAR
-          │
-          ▼
-        Nexus
+## Objectifs du projet
 
-Cette chaîne permet notamment d'automatiser :
+Les principaux objectifs de ce laboratoire sont :
 
-- la récupération du code source ;
-- la compilation ;
-- l'exécution des tests ;
-- l'analyse de la qualité du code ;
-- la génération du fichier JAR ;
-- la publication de l'artefact dans Nexus Repository.
+- **Gestion du code source :** utiliser Git et GitHub pour versionner le projet et centraliser le code source.
+- **Intégration continue (CI) :** automatiser la récupération du code, la compilation et les tests avec Jenkins et Maven.
+- **Qualité du code :** analyser le code source avec SonarQube.
+- **Gestion des artefacts :** publier et stocker les artefacts Maven dans Nexus Repository.
+- **Conteneurisation :** construire des images Docker pour empaqueter l'application.
+- **Sécurité :** analyser les images Docker à la recherche de vulnérabilités avec Trivy.
+- **Publication des images :** utiliser Docker Hub comme registre d'images.
+- **Orchestration :** déployer l'application avec Docker Swarm et Kubernetes.
+- **Gestion des déploiements :** utiliser Helm pour organiser et paramétrer les ressources Kubernetes.
+- **Gestion des secrets :** intégrer HashiCorp Vault pour sécuriser l'accès aux informations sensibles.
+- **Déploiement continu (CD) :** automatiser le processus de déploiement Kubernetes avec Jenkins et Argo CD selon une approche GitOps.
+- **Tests de performance :** utiliser Apache JMeter pour effectuer des tests de charge sur l'application déployée.
 
+## Vue d'ensemble du laboratoire
+
+Le laboratoire est organisé autour de trois axes complémentaires :
+
+1. **Intégration continue et gestion des artefacts :** Jenkins, Maven, SonarQube et Nexus permettent de construire et de vérifier l'application.
+2. **Conteneurisation et déploiement :** Docker, Trivy, Docker Hub, Docker Swarm et Kubernetes permettent de conteneuriser, sécuriser et déployer l'application.
+3. **Déploiement GitOps et validation :** Helm, HashiCorp Vault et Argo CD permettent de gérer le déploiement Kubernetes, tandis qu'Apache JMeter permet d'évaluer les performances de l'application.
+
+## Chaîne globale du laboratoire
+
+```mermaid
+flowchart TD
+    A["Développement de l'application Java"]
+    B["Git et GitHub"]
+    C["Jenkins - Intégration continue"]
+    D["Maven - Compilation et tests"]
+    E["SonarQube - Qualité du code"]
+    F["Nexus Repository - Artefacts Maven"]
+    G["Docker - Construction de l'image"]
+    H["Trivy - Analyse de sécurité"]
+    I["Docker Hub - Registre d'images"]
+    J["Docker Swarm"]
+    K["Kubernetes"]
+    L["Helm - Gestion des ressources"]
+    M["Jenkins - Pipeline CD"]
+    N["HashiCorp Vault - Gestion des secrets"]
+    O["GitHub - Configuration de déploiement"]
+    P["Argo CD - Synchronisation GitOps"]
+    Q["Application déployée"]
+    R["Apache JMeter - Tests de charge"]
+
+    A --> B --> C --> D
+    D --> E
+    D --> F
+    B --> G --> H --> I
+    I --> J
+    I --> K
+    L --> K
+    C --> M
+    M --> N
+    M --> O
+    O --> P --> K
+    K --> Q --> R
+
+    classDef development fill:#e8f0fe,stroke:#356ac3,color:#111;
+    classDef ci fill:#e8f5e9,stroke:#39834a,color:#111;
+    classDef container fill:#fff3e0,stroke:#c17b22,color:#111;
+    classDef deployment fill:#e3f2fd,stroke:#2875a8,color:#111;
+    classDef gitops fill:#f3e5f5,stroke:#8651a5,color:#111;
+    classDef testing fill:#fce4ec,stroke:#b84b72,color:#111;
+
+    class A,B development;
+    class C,D,E,F ci;
+    class G,H,I,J container;
+    class K,L,Q deployment;
+    class M,N,O,P gitops;
+    class R testing;
+```
+
+## Résultat attendu
+
+À travers ce laboratoire, l'objectif est de disposer d'un environnement permettant de comprendre et de mettre en pratique les différentes étapes d'une démarche DevOps : automatisation de la construction, contrôle de la qualité, gestion des artefacts, sécurisation des images, déploiement sur différentes plateformes d'orchestration, gestion des secrets, GitOps et tests de performance.
+
+Les différents composants sont étudiés et intégrés progressivement afin de comprendre leur rôle, leurs interactions et leur contribution au cycle de vie de l'application.
+
+
+
+
+## 2. Architecture globale du laboratoire DevOps
+
+### 2.1 Présentation générale
+
+Ce laboratoire met en place une chaîne DevOps complète permettant d'automatiser les principales étapes du cycle de vie d'une application, depuis la gestion du code source jusqu'à son déploiement et sa validation.
+
+L'architecture repose sur plusieurs composants complémentaires :
+
+- **Gestion du code source :** Git et GitHub.
+- **Intégration continue (CI) :** Jenkins, Maven, SonarQube et Nexus Repository.
+- **Conteneurisation :** Docker.
+- **Sécurité des images :** Trivy.
+- **Publication des images :** Docker Hub.
+- **Orchestration des conteneurs :** Docker Swarm et Kubernetes.
+- **Gestion des déploiements Kubernetes :** Helm.
+- **Gestion des secrets :** HashiCorp Vault.
+- **Déploiement GitOps :** Argo CD.
+- **Tests de charge :** Apache JMeter.
+
+Le laboratoire utilise plusieurs machines virtuelles VMware afin de séparer les services et de reproduire un environnement DevOps distribué.
+
+### 2.2 Architecture globale
+
+Le schéma suivant représente les différents composants, leurs interactions et les flux de déploiement de l'application.
+
+```mermaid
+flowchart TB
+    DEV["Développeuse / Administratrice"]
+    GH["GitHub<br/>Dépôt CI-Lab"]
+
+    DEV -->|"Développement et push"| GH
+
+    subgraph CI["1. INTÉGRATION CONTINUE - CI"]
+        JENKINS["Jenkins<br/>Pipeline CI"]
+        MAVEN["Maven<br/>Compilation et tests"]
+        SONAR["SonarQube<br/>Analyse de qualité"]
+        NEXUS["Nexus Repository<br/>Stockage des artefacts"]
+
+        JENKINS --> MAVEN
+        MAVEN --> SONAR
+        MAVEN --> NEXUS
+    end
+
+    GH -->|"Récupération du code"| JENKINS
+
+    subgraph CONTAINER["2. CONTENEURISATION ET SÉCURITÉ"]
+        DOCKER["Docker<br/>Construction de l'image"]
+        TRIVY["Trivy<br/>Analyse des vulnérabilités"]
+        HUB["Docker Hub<br/>Registre des images"]
+
+        DOCKER --> TRIVY
+        TRIVY -->|"Image validée"| HUB
+    end
+
+    GH -->|"Code source et Dockerfile"| DOCKER
+
+    subgraph SWARM["3. DÉPLOIEMENT DOCKER SWARM"]
+        SWARMDEP["Jenkins<br/>Pipeline Docker / Swarm"]
+        SWARMCLUSTER["Cluster Docker Swarm"]
+        SWARMAPP["Application conteneurisée<br/>2 réplicas"]
+
+        SWARMDEP -->|"Déploiement"| SWARMCLUSTER
+        SWARMCLUSTER --> SWARMAPP
+    end
+
+    HUB -->|"Récupération de l'image"| SWARMCLUSTER
+
+    subgraph K8S["4. ORCHESTRATION KUBERNETES"]
+        CONTROL["Kubernetes Control Plane"]
+        WORKERS["Nœuds Workers"]
+        HELM["Helm<br/>Chart ci-app"]
+        APP["Application ci-app<br/>Deployment et Pods"]
+        SERVICE["Service NodePort<br/>Port 30080"]
+
+        CONTROL --> WORKERS
+        HELM -->|"Définit les ressources"| APP
+        APP --> SERVICE
+    end
+
+    subgraph GITOPS["5. DÉPLOIEMENT GITOPS ET GESTION DES SECRETS"]
+        JENKINSCD["Jenkins<br/>Pipeline CD Kubernetes"]
+        VAULT["HashiCorp Vault<br/>Authentification Kubernetes<br/>et secrets"]
+        ARGO["Argo CD<br/>Synchronisation GitOps"]
+
+        JENKINSCD -->|"Authentification Kubernetes"| VAULT
+        JENKINSCD -->|"Mise à jour du chart Helm"| GH
+        ARGO -->|"Surveillance du dépôt"| GH
+        ARGO -->|"Synchronisation"| K8S
+    end
+
+    HUB -->|"Image Docker"| APP
+
+    subgraph TESTS["6. TESTS DE CHARGE INDÉPENDANTS"]
+        JM["Apache JMeter<br/>Exécution manuelle sur CentOS"]
+        RESULTS["Fichiers JTL et logs<br/>Rapports HTML"]
+        JM --> RESULTS
+    end
+
+    SERVICE -->|"Requêtes HTTP"| JM
+
+    classDef source fill:#e8f0fe,stroke:#356ac3,color:#111;
+    classDef ci fill:#e8f5e9,stroke:#39834a,color:#111;
+    classDef container fill:#fff3e0,stroke:#c17b22,color:#111;
+    classDef orchestration fill:#e3f2fd,stroke:#2875a8,color:#111;
+    classDef gitops fill:#f3e5f5,stroke:#8651a5,color:#111;
+    classDef tests fill:#fce4ec,stroke:#b84b72,color:#111;
+
+    class DEV,GH source;
+    class JENKINS,MAVEN,SONAR,NEXUS ci;
+    class DOCKER,TRIVY,HUB,SWARMDEP,SWARMCLUSTER,SWARMAPP container;
+    class CONTROL,WORKERS,HELM,APP,SERVICE orchestration;
+    class JENKINSCD,VAULT,ARGO gitops;
+    class JM,RESULTS tests;
+```
+
+### 2.3 Organisation de l'infrastructure VMware
+
+Les différents services sont répartis sur les machines virtuelles suivantes :
+
+| Machine virtuelle | Adresse IP | Rôle principal |
+|---|---|---|
+| Jenkins | `192.168.42.151` | Exécution des pipelines CI et CD |
+| SonarQube | `192.168.42.152` | Analyse de la qualité du code |
+| Nexus | `192.168.42.128` | Gestion et stockage des artefacts |
+| CentOS Docker / Trivy | `192.168.42.157` | Conteneurisation, analyse de sécurité et environnement JMeter |
+| Kubernetes Control Plane | `192.168.42.208` | Administration du cluster Kubernetes |
+| Kubernetes Worker | `192.168.121.104` | Nœud de travail Kubernetes |
+| Kubernetes Worker Node 1 | `192.168.42.213` | Exécution des applications et des composants du laboratoire |
+
+Les adresses IP correspondent à la configuration du laboratoire et peuvent évoluer selon la configuration réseau des machines virtuelles.
+
+### 2.4 Fonctionnement de la chaîne d'intégration continue (CI)
+
+La première partie du laboratoire automatise la vérification et la construction de l'application.
+
+1. La développeuse effectue des modifications dans le projet.
+2. Le code source est envoyé sur le dépôt GitHub.
+3. Jenkins récupère automatiquement le code source.
+4. Maven compile le projet et exécute les tests configurés.
+5. SonarQube analyse la qualité du code.
+6. Nexus Repository permet de stocker et de gérer les artefacts générés.
+
+Cette partie permet de détecter les erreurs et de vérifier la qualité de l'application avant son déploiement.
+
+### 2.5 Fonctionnement de la chaîne Docker et Docker Swarm
+
+Une deuxième partie du laboratoire permet de construire et de déployer l'application sous forme de conteneur.
+
+1. Jenkins récupère le code source et le Dockerfile.
+2. Docker construit l'image de l'application.
+3. Trivy analyse l'image à la recherche de vulnérabilités.
+4. L'image est publiée sur Docker Hub.
+5. Jenkins déclenche le déploiement sur le cluster Docker Swarm.
+6. Docker Swarm assure l'exécution et la gestion des réplicas de l'application.
+
+Cette partie permet de comprendre la conteneurisation, la sécurisation des images et l'orchestration avec Docker Swarm.
+
+### 2.6 Fonctionnement de la chaîne de déploiement Kubernetes (CD)
+
+La troisième partie du laboratoire met en place un déploiement Kubernetes basé sur une approche GitOps.
+
+Le pipeline CD Jenkins est indépendant du pipeline CI et du pipeline Docker / Swarm.
+
+Son fonctionnement est le suivant :
+
+1. Jenkins récupère le dépôt GitHub.
+2. Le pipeline s'authentifie auprès de HashiCorp Vault en utilisant l'authentification Kubernetes.
+3. Vault applique la politique associée au rôle utilisé et permet l'accès aux secrets autorisés.
+4. Jenkins met à jour les paramètres du chart Helm de l'application.
+5. Les modifications sont publiées sur GitHub.
+6. Argo CD surveille le dépôt GitHub et détecte les changements.
+7. Argo CD synchronise l'état souhaité avec le cluster Kubernetes.
+8. Kubernetes crée ou met à jour les ressources nécessaires à l'exécution de l'application.
+
+Le chart Helm se trouve dans le répertoire `helm/ci-app`, tandis que la configuration de l'application Argo CD se trouve dans `argocd/`.
+
+### 2.7 Fonctionnement des tests de charge avec Apache JMeter
+
+Les tests de charge constituent une activité indépendante des pipelines Jenkins.
+
+Ils sont exécutés manuellement depuis la machine CentOS sur laquelle Apache JMeter est installé.
+
+Le scénario de test est stocké dans le dépôt GitHub :
+
+```text
+tests/
+└── jmeter/
+    └── ci-app-load-test.jmx
+```
+
+Les scripts d'installation et d'exécution sont organisés dans :
+
+```text
+scripts_Jmeter_Tests/
+├── install-jmeter.sh
+├── jmeter.conf
+└── run-jmeter-tests.sh
+```
+
+Le déroulement des tests est le suivant :
+
+1. Lancement manuel du script de tests.
+2. Chargement du scénario JMeter.
+3. Envoi de requêtes HTTP vers l'application déployée sur Kubernetes.
+4. Collecte des résultats et des journaux d'exécution.
+5. Génération d'un rapport HTML pour analyser les performances.
+
+Les résultats sont enregistrés dans les répertoires configurés sous `/opt/jmeter/`.
+
+Cette séparation permet d'effectuer des tests de performance sans ajouter de charge supplémentaire aux pipelines CI/CD.
+
+### 2.8 Synthèse des flux
+
+| Flux | Source | Destination | Objectif |
+|---|---|---|---|
+| CI | GitHub | Jenkins | Récupération du code |
+| CI | Jenkins | Maven | Compilation et tests |
+| CI | Maven | SonarQube | Analyse de qualité |
+| CI | Maven | Nexus | Publication des artefacts |
+| Docker | Jenkins / Docker | Trivy | Analyse de l'image |
+| Docker | Docker | Docker Hub | Publication de l'image |
+| Swarm | Docker Hub | Docker Swarm | Récupération de l'image et déploiement |
+| CD | Jenkins | Vault | Authentification et accès aux secrets autorisés |
+| CD | Jenkins | GitHub | Mise à jour du chart Helm |
+| GitOps | Argo CD | GitHub | Surveillance de la configuration |
+| GitOps | Argo CD | Kubernetes | Synchronisation des ressources |
+| Tests | Apache JMeter | Application Kubernetes | Mesure des performances |
+
+### 2.9 Résultat de l'architecture
+
+Cette architecture permet de mettre en œuvre plusieurs pratiques fondamentales du DevOps :
+
+- Automatisation de l'intégration continue.
+- Analyse de la qualité du code.
+- Gestion centralisée des artefacts.
+- Conteneurisation des applications.
+- Analyse des vulnérabilités des images Docker.
+- Déploiement et orchestration avec Docker Swarm.
+- Orchestration des applications avec Kubernetes.
+- Gestion des configurations avec Helm.
+- Sécurisation de l'accès aux secrets avec Vault.
+- Déploiement GitOps avec Argo CD.
+- Mesure des performances avec Apache JMeter.
+
+L'ensemble constitue un laboratoire DevOps distribué qui couvre les principales étapes du cycle de vie d'une application, de son développement jusqu'à son déploiement et à l'évaluation de ses performances.
 ---
 
-# 2. Architecture
-
-## 2.1 Architecture globale
-
-L'architecture du laboratoire repose sur plusieurs machines virtuelles ayant chacune un rôle précis.
-
-    ┌─────────────────┐
-    │   Développeur   │
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │      Git        │
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │     GitHub      │
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │     Jenkins     │
-    │ 192.168.42.151  │
-    └────────┬────────┘
-             │
-    ┌────────┴────────────┐
-    │                     │
-    ▼                     ▼
-┌──────────────┐    ┌──────────────┐
-│  SonarQube   │    │     Nexus    │
-│192.168.42.152│    │192.168.42.128│
-└──────┬───────┘    └──────────────┘
-       │
-       ▼
-┌──────────────┐
-│  PostgreSQL  │
-└──────────────┘
-
-### Fichiers d'architecture
-
-Le schéma Draw.io est disponible dans :
-
-    architecture/
-    ├── 01-global-architecture.drawio
-    └── 01-global-architecture.png
-
----
 
 # 3. Technologies utilisées
 
