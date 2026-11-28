@@ -899,3 +899,765 @@ La chaîne finale est donc :
         Nexus
 
 Le laboratoire permet ainsi de comprendre concrètement le fonctionnement d'une chaîne CI, depuis la gestion du code source jusqu'à la publication automatisée d'un artefact.
+
+
+# 22. Extension du laboratoire : chaîne DevOps et déploiement
+
+Après la mise en place de la chaîne d'intégration continue, le laboratoire est étendu afin de couvrir les principales étapes du cycle de vie d'une application conteneurisée.
+
+Cette extension introduit plusieurs technologies complémentaires :
+
+- Docker pour la conteneurisation de l'application ;
+- Trivy pour l'analyse de sécurité des images ;
+- Docker Swarm pour l'orchestration des conteneurs ;
+- Kubernetes pour l'orchestration des applications conteneurisées ;
+- Helm pour la gestion et le déploiement des applications Kubernetes ;
+- HashiCorp Vault pour la gestion des secrets ;
+- Argo CD pour l'automatisation des déploiements selon l'approche GitOps ;
+- Apache JMeter pour les tests de charge exécutés indépendamment de Jenkins.
+
+L'objectif est de mettre en œuvre une chaîne DevOps progressive, depuis la récupération du code source jusqu'au déploiement de l'application sur différentes plateformes.
+
+## 23. Architecture globale du laboratoire DevOps
+
+L'architecture repose sur plusieurs machines virtuelles spécialisées. Chaque machine assure un rôle précis dans le processus de développement, d'intégration, de sécurité et de déploiement.
+
+### 23.1 Vue d'ensemble
+
+```mermaid
+flowchart TD
+    A["Développeur"] --> B["Git"]
+    B --> C["GitHub"]
+    C --> D["Jenkins"]
+
+    D --> E["Maven : Build et tests"]
+    E --> F["SonarQube : Qualité du code"]
+    E --> G["Nexus : Artefacts Maven"]
+
+    D --> H["Docker : Construction de l'image"]
+    H --> I["Trivy : Analyse de sécurité"]
+    I --> J["Docker Hub : Publication de l'image"]
+    J --> K["Docker Swarm : Déploiement"]
+
+    C --> L["Dépôt GitOps"]
+    L --> M["Argo CD"]
+    M --> N["Helm"]
+    N --> O["Kubernetes"]
+
+    O --> P["Application CI-App"]
+    O --> Q["Vault : Gestion des secrets"]
+
+    R["JMeter sur CentOS"] --> P
+```
+
+Cette architecture distingue les différents environnements de déploiement et les responsabilités de chaque outil.
+
+### 23.2 Organisation des pipelines
+
+Le laboratoire utilise plusieurs processus indépendants :
+
+| Pipeline ou processus | Objectif |
+|---|---|
+| Jenkins CI | Compilation, tests, analyse SonarQube et publication Maven |
+| Pipeline Docker / Swarm | Construction de l'image, contrôle de sécurité et déploiement Docker Swarm, selon les étapes configurées |
+| Pipeline CD Kubernetes | Authentification Vault, mise à jour de la configuration Helm et synchronisation Argo CD |
+| Tests JMeter | Tests de charge exécutés localement sur la VM CentOS |
+
+Cette séparation permet de mieux identifier les responsabilités de chaque pipeline et de faciliter le diagnostic des erreurs.
+
+## 24. Conteneurisation avec Docker
+
+### 24.1 Présentation
+
+Docker permet de transformer l'application Java en une image conteneurisée.
+
+Cette image contient les éléments nécessaires à l'exécution de l'application et peut être utilisée dans différents environnements.
+
+La conteneurisation apporte notamment :
+
+- Une meilleure portabilité de l'application ;
+- Une isolation de l'environnement d'exécution ;
+- Une simplification du déploiement ;
+- Une meilleure reproductibilité des environnements.
+
+### 24.2 Construction de l'image Docker
+
+Le projet utilise un Dockerfile pour définir les instructions de construction de l'image.
+
+L'image de l'application est identifiée par :
+
+```text
+insafnemri/ci-app
+```
+
+Le processus de construction peut être représenté ainsi :
+
+```mermaid
+flowchart TD
+    A["Code source Java"] --> B["Maven"]
+    B --> C["Artefact de l'application"]
+    C --> D["Dockerfile"]
+    D --> E["Docker Build"]
+    E --> F["Image Docker ci-app"]
+```
+
+L'image construite constitue le support utilisé pour les déploiements sur les plateformes de conteneurisation.
+
+## 25. Analyse de sécurité avec Trivy
+
+### 25.1 Présentation
+
+Trivy est un outil d'analyse de sécurité permettant notamment de détecter les vulnérabilités présentes dans les images Docker.
+
+Il intervient dans le processus de contrôle de sécurité avant la publication ou le déploiement d'une image.
+
+### 25.2 Fonctionnement
+
+Le processus d'analyse suit les étapes suivantes :
+
+1. Construction de l'image Docker ;
+2. Analyse de l'image avec Trivy ;
+3. Identification des vulnérabilités ;
+4. Consultation du rapport d'analyse ;
+5. Poursuite du processus selon les règles de sécurité définies.
+
+```mermaid
+flowchart TD
+    A["Construction de l'image"] --> B["Trivy Scan"]
+    B --> C{"Résultat de l'analyse"}
+    C -->|Conforme aux règles| D["Publication de l'image"]
+    C -->|Problèmes détectés| E["Analyse et correction"]
+    E --> A
+    D --> F["Déploiement"]
+```
+
+Trivy permet ainsi d'intégrer un contrôle de sécurité des images dans le cycle de livraison de l'application.
+
+## 26. Publication de l'image sur Docker Hub
+
+Après la construction et les contrôles prévus, l'image Docker peut être publiée sur Docker Hub.
+
+Image utilisée :
+
+```text
+insafnemri/ci-app
+```
+
+Le flux de publication est le suivant :
+
+```text
+Code source
+    |
+    v
+Docker Build
+    |
+    v
+Image Docker
+    |
+    v
+Trivy Scan
+    |
+    v
+Docker Push
+    |
+    v
+Docker Hub
+```
+
+Le registre Docker Hub permet de centraliser les images et de les rendre accessibles aux environnements de déploiement.
+
+## 27. Déploiement avec Docker Swarm
+
+### 27.1 Présentation
+
+Docker Swarm est utilisé pour orchestrer les conteneurs Docker.
+
+Il permet de gérer les services, les réplicas et les ports d'accès à l'application.
+
+Dans ce laboratoire, le service applicatif est nommé :
+
+```text
+ci-app
+```
+
+Le déploiement utilise deux réplicas de l'application.
+
+### 27.2 Architecture Docker Swarm
+
+```mermaid
+flowchart TD
+    A["Docker Hub"] --> B["Nœud Docker Swarm"]
+    B --> C["Service ci-app"]
+    C --> D["Réplique 1"]
+    C --> E["Réplique 2"]
+    D --> F["Application"]
+    E --> F
+    G["Utilisateur"] --> H["Port 8082"]
+    H --> F
+```
+
+### 27.3 Vérification du déploiement
+
+Les commandes suivantes permettent de vérifier le fonctionnement du service :
+
+Vérifier les services :
+
+```bash
+docker service ls
+```
+
+Consulter les détails du service :
+
+```bash
+docker service inspect ci-app
+```
+
+Vérifier les réplicas :
+
+```bash
+docker service ps ci-app
+```
+
+Consulter les journaux :
+
+```bash
+docker service logs ci-app
+```
+
+L'objectif est de vérifier que le service est correctement déployé et que les deux réplicas sont opérationnels.
+
+## 28. Orchestration avec Kubernetes
+
+### 28.1 Présentation
+
+Kubernetes est utilisé comme plateforme d'orchestration des conteneurs.
+
+Il permet de gérer le cycle de vie des applications, leur disponibilité et leur exposition réseau.
+
+Le laboratoire utilise un cluster Kubernetes constitué de plusieurs machines virtuelles.
+
+### 28.2 Architecture du cluster
+
+Le cluster comprend notamment les nœuds suivants :
+
+| Nœud | Adresse IP | Rôle |
+|---|---|---|
+| k8s-control | 192.168.42.208 | Nœud de contrôle |
+| k8s-worker | 192.168.121.104 | Nœud de travail |
+| k8s-worker-node-1 | 192.168.42.213 | Nœud de travail |
+
+Les adresses et états des nœuds doivent être vérifiés sur l'environnement au moment de la documentation.
+
+### 28.3 Architecture Kubernetes
+
+```mermaid
+flowchart TD
+    A["Utilisateur"] --> B["Service NodePort : 30080"]
+    B --> C["Service ci-app"]
+    C --> D["Deployment ci-app"]
+    D --> E["Pod ci-app"]
+    E --> F["Conteneur Docker"]
+    F --> G["Application Java"]
+
+    H["k8s-control"] --> D
+    I["k8s-worker-node-1"] --> E
+```
+
+### 28.4 Vérification du cluster
+
+Vérifier les nœuds :
+
+```bash
+kubectl get nodes -o wide
+```
+
+Vérifier les pods :
+
+```bash
+kubectl get pods -o wide
+```
+
+Vérifier les services :
+
+```bash
+kubectl get services
+```
+
+Vérifier les déploiements :
+
+```bash
+kubectl get deployments
+```
+
+Ces commandes permettent de contrôler l'état des ressources Kubernetes.
+
+## 29. Gestion des applications avec Helm
+
+### 29.1 Présentation
+
+Helm est un gestionnaire de packages pour Kubernetes.
+
+Il permet de regrouper les ressources Kubernetes d'une application dans un chart afin de simplifier leur installation et leur configuration.
+
+Dans ce laboratoire, l'application CI-App est organisée dans le chart :
+
+```text
+helm/
+└── ci-app/
+    ├── Chart.yaml
+    ├── values.yaml
+    └── templates/
+        ├── deployment.yaml
+        ├── service.yaml
+        └── serviceaccount.yaml
+```
+
+### 29.2 Fonctionnement de Helm
+
+Le chart Helm regroupe les paramètres et les ressources nécessaires au déploiement de l'application.
+
+```mermaid
+flowchart TD
+    A["Chart Helm : ci-app"] --> B["Chart.yaml"]
+    A --> C["values.yaml"]
+    A --> D["templates/"]
+    D --> E["Deployment"]
+    D --> F["Service"]
+    D --> G["ServiceAccount"]
+    E --> H["Cluster Kubernetes"]
+    F --> H
+    G --> H
+```
+
+Le fichier `values.yaml` permet notamment de définir :
+
+- Le nom de l'image Docker ;
+- Le tag de l'image ;
+- La politique de récupération de l'image ;
+- Le nombre de réplicas ;
+- La configuration des ports.
+
+### 29.3 Commandes de vérification
+
+Afficher les releases Helm :
+
+```bash
+helm list -A
+```
+
+Vérifier le chart :
+
+```bash
+helm lint helm/ci-app
+```
+
+Afficher les ressources générées :
+
+```bash
+helm template ci-app helm/ci-app
+```
+
+Mettre à jour le déploiement :
+
+```bash
+helm upgrade --install ci-app helm/ci-app
+```
+
+Helm permet ainsi de rendre les déploiements Kubernetes plus reproductibles et plus faciles à maintenir.
+
+## 30. Gestion des secrets avec HashiCorp Vault
+
+### 30.1 Présentation
+
+HashiCorp Vault est utilisé pour centraliser la gestion des secrets.
+
+Il permet de stocker et de contrôler l'accès aux informations sensibles utilisées par les applications et les processus d'automatisation.
+
+Dans ce laboratoire, Vault est intégré au processus de déploiement Kubernetes.
+
+### 30.2 Architecture Vault
+
+Vault est déployé dans le cluster Kubernetes, dans l'espace de noms :
+
+```text
+vault
+```
+
+L'authentification Kubernetes permet à un service account autorisé d'obtenir un jeton Vault.
+
+```mermaid
+flowchart TD
+    A["Pipeline Jenkins"] --> B["Authentification Kubernetes"]
+    B --> C["Vault"]
+    C --> D["Rôle ci-app"]
+    D --> E["Politique ci-app-policy"]
+    E --> F["Accès aux secrets KV"]
+```
+
+### 30.3 Authentification Kubernetes
+
+Vault utilise le mécanisme Kubernetes Auth pour authentifier les workloads autorisés.
+
+Les principaux éléments configurés sont :
+
+- Le chemin d'authentification `kubernetes` ;
+- Le rôle `ci-app` ;
+- Le service account `ci-app` ;
+- La politique `ci-app-policy` ;
+- Le moteur de secrets KV.
+
+Le chemin de stockage utilisé pour les secrets de l'application est :
+
+```text
+secret/data/ci-app
+```
+
+Cette configuration permet de contrôler les accès aux secrets selon les rôles et les politiques définis.
+
+## 31. Déploiement GitOps avec Argo CD
+
+### 31.1 Présentation
+
+Argo CD est utilisé pour mettre en œuvre l'approche GitOps sur Kubernetes.
+
+Il surveille le dépôt Git et compare l'état déclaré dans les fichiers de configuration avec l'état réel des ressources déployées dans le cluster.
+
+Lorsque des modifications sont publiées dans Git, Argo CD peut synchroniser l'application avec la configuration déclarée.
+
+### 31.2 Architecture GitOps
+
+```mermaid
+flowchart TD
+    A["Développeur"] --> B["Modification des fichiers Helm"]
+    B --> C["Git Commit"]
+    C --> D["GitHub"]
+    D --> E["Argo CD"]
+    E --> F["Synchronisation"]
+    F --> G["Kubernetes"]
+    G --> H["Application CI-App"]
+```
+
+### 31.3 Application Argo CD
+
+L'application déployée porte le nom :
+
+```text
+ci-app
+```
+
+Elle utilise le dépôt GitHub :
+
+```text
+INSAF-DEBUG/CI-Lab
+```
+
+Le chemin du chart Helm est :
+
+```text
+helm/ci-app
+```
+
+Argo CD utilise ce chemin pour suivre la configuration déclarée de l'application.
+
+### 31.4 Vérification de l'application
+
+Lister les applications Argo CD :
+
+```bash
+kubectl get applications -n argocd
+```
+
+Afficher les détails de l'application :
+
+```bash
+kubectl describe application ci-app -n argocd
+```
+
+Vérifier les ressources déployées :
+
+```bash
+kubectl get pods
+kubectl get services
+kubectl get deployments
+```
+
+Les états recherchés sont :
+
+- Synchronisation : `Synced` ;
+- Santé : `Healthy`.
+
+Ces états indiquent que la configuration Git suivie par Argo CD est synchronisée et que les ressources sont considérées comme saines.
+
+## 32. Pipeline CD Kubernetes avec Jenkins, Vault et Argo CD
+
+### 32.1 Objectif
+
+Un pipeline CD distinct est utilisé pour automatiser certaines opérations de livraison vers Kubernetes.
+
+Il est séparé du pipeline CI et du déploiement Docker Swarm.
+
+Son objectif est de mettre à jour la configuration Helm dans Git et de déclencher la synchronisation Argo CD.
+
+### 32.2 Étapes du pipeline
+
+Le processus est organisé autour des étapes suivantes :
+
+1. Récupération du dépôt GitHub ;
+2. Validation du tag de l'image Docker ;
+3. Authentification auprès de Vault ;
+4. Accès aux secrets autorisés ;
+5. Mise à jour de la configuration Helm ;
+6. Publication des modifications dans GitHub ;
+7. Synchronisation de l'application avec Argo CD.
+
+### 32.3 Schéma du pipeline
+
+```mermaid
+flowchart TD
+    A["Jenkins"] --> B["Checkout GitHub"]
+    B --> C["Validation du tag Docker"]
+    C --> D["Authentification Vault"]
+    D --> E["Accès autorisé aux secrets"]
+    E --> F["Mise à jour values.yaml"]
+    F --> G["Git Commit et Push"]
+    G --> H["Argo CD"]
+    H --> I["Synchronisation Kubernetes"]
+    I --> J["Application CI-App"]
+```
+
+Cette organisation associe l'automatisation Jenkins, la gestion des secrets avec Vault et la livraison déclarative avec Argo CD.
+
+## 33. Tests de charge avec Apache JMeter
+
+### 33.1 Présentation
+
+Apache JMeter est utilisé pour réaliser des tests de charge sur l'application CI-App.
+
+Contrairement aux étapes de compilation, d'analyse et de déploiement, les tests de charge sont exécutés localement et indépendamment de Jenkins.
+
+Ils sont lancés manuellement sur la machine CentOS lorsque cela est nécessaire.
+
+Cette séparation permet de déclencher les tests de performance sans exécuter à nouveau l'ensemble du pipeline CI/CD.
+
+### 33.2 Organisation des fichiers
+
+Les scripts d'installation et d'exécution sont regroupés dans :
+
+```text
+scripts_Jmeter_Tests/
+├── install-jmeter.sh
+├── jmeter.conf
+└── run-jmeter-tests.sh
+```
+
+Le scénario de test est conservé dans :
+
+```text
+tests/
+└── jmeter/
+    └── ci-app-load-test.jmx
+```
+
+### 33.3 Architecture des tests JMeter
+
+```mermaid
+flowchart TD
+    A["VM CentOS"] --> B["run-jmeter-tests.sh"]
+    B --> C["Apache JMeter"]
+    C --> D["ci-app-load-test.jmx"]
+    D --> E["Application CI-App"]
+    E --> F["Réponses HTTP"]
+    F --> G["Résultats JTL"]
+    G --> H["Rapport HTML"]
+```
+
+### 33.4 Rôle des fichiers
+
+| Fichier | Fonction |
+|---|---|
+| `install-jmeter.sh` | Installe Apache JMeter |
+| `jmeter.conf` | Centralise les paramètres et les chemins |
+| `run-jmeter-tests.sh` | Lance les tests et génère les résultats |
+| `ci-app-load-test.jmx` | Définit le scénario de charge |
+
+### 33.5 Exécution locale
+
+Les tests sont exécutés depuis la VM CentOS avec le compte applicatif dédié :
+
+```bash
+sudo -u jmeterapp bash scripts_Jmeter_Tests/run-jmeter-tests.sh
+```
+
+JMeter utilise le mode non graphique afin d'exécuter le scénario sans interface utilisateur.
+
+### 33.6 Résultats des tests
+
+Les résultats sont enregistrés dans :
+
+```text
+/opt/jmeter/results/
+```
+
+Les rapports HTML sont générés dans :
+
+```text
+/opt/jmeter/reports/
+```
+
+Les indicateurs analysés peuvent notamment comprendre :
+
+- Le nombre de requêtes exécutées ;
+- Le temps de réponse moyen ;
+- Les temps de réponse minimum et maximum ;
+- Le taux d'erreur ;
+- Le débit ;
+- Les percentiles de temps de réponse.
+
+Les tests JMeter ne constituent pas une étape obligatoire du pipeline Jenkins. Ils sont réalisés à la demande, indépendamment du processus CI/CD.
+
+## 34. Structure globale du dépôt GitHub
+
+La structure du dépôt est organisée par domaine fonctionnel :
+
+```text
+CI-Lab/
+│
+├── Documentations/
+│
+├── architecture/
+│   ├── 01-global-architecture.drawio
+│   └── 01-global-architecture.png
+│
+├── argocd/
+│
+├── ci-app/
+│   ├── src/
+│   ├── pom.xml
+│   ├── Dockerfile
+│   ├── Jenkinsfile-CD-K8s-Vault-ArgoCD
+│   └── ...
+│
+├── helm/
+│   └── ci-app/
+│       ├── Chart.yaml
+│       ├── values.yaml
+│       └── templates/
+│
+├── scripts_Jmeter_Tests/
+│   ├── install-jmeter.sh
+│   ├── jmeter.conf
+│   └── run-jmeter-tests.sh
+│
+├── tests/
+│   └── jmeter/
+│       └── ci-app-load-test.jmx
+│
+├── Jenkinsfile_Tests
+├── Jenkinsfile_Docker_Docker-Swarm_CD
+├── README.md
+└── .gitignore
+```
+
+Cette organisation permet de séparer :
+
+- Le code source de l'application ;
+- Les pipelines Jenkins ;
+- Les configurations Kubernetes ;
+- Les ressources Helm ;
+- Les configurations Argo CD ;
+- Les scripts de tests de charge.
+
+## 35. Synthèse des technologies utilisées
+
+| Technologie | Rôle dans le laboratoire |
+|---|---|
+| Git / GitHub | Gestion et hébergement du code source |
+| Java / Maven | Construction et tests de l'application |
+| Jenkins | Automatisation CI/CD |
+| SonarQube | Analyse de la qualité du code |
+| Nexus | Stockage des artefacts Maven |
+| Docker | Conteneurisation |
+| Trivy | Analyse de sécurité des images |
+| Docker Hub | Registre d'images |
+| Docker Swarm | Orchestration Docker |
+| Kubernetes | Orchestration des conteneurs |
+| Helm | Gestion des déploiements Kubernetes |
+| HashiCorp Vault | Gestion des secrets |
+| Argo CD | Déploiement GitOps |
+| Apache JMeter | Tests de charge locaux |
+
+## 36. Résultat global du laboratoire
+
+Le laboratoire couvre désormais plusieurs étapes complémentaires du cycle de vie d'une application.
+
+```mermaid
+flowchart TD
+    A["Développement"] --> B["Git / GitHub"]
+    B --> C["Jenkins CI"]
+    C --> D["Maven Build et Tests"]
+    D --> E["SonarQube"]
+    D --> F["Nexus"]
+
+    F --> G["Construction Docker"]
+    G --> H["Trivy"]
+    H --> I["Docker Hub"]
+
+    I --> J["Docker Swarm"]
+    I --> K["Kubernetes"]
+
+    K --> L["Helm"]
+    L --> M["Argo CD"]
+    M --> N["Application déployée"]
+
+    O["Vault"] --> M
+
+    P["JMeter local sur CentOS"] --> N
+```
+
+Le laboratoire permet ainsi de mettre en pratique :
+
+- L'intégration continue ;
+- L'analyse de la qualité du code ;
+- La publication des artefacts ;
+- La conteneurisation ;
+- L'analyse de sécurité ;
+- L'orchestration Docker ;
+- L'orchestration Kubernetes ;
+- La gestion des déploiements avec Helm ;
+- La gestion sécurisée des secrets avec Vault ;
+- Le déploiement GitOps avec Argo CD ;
+- Les tests de charge indépendants avec Apache JMeter.
+
+## 37. Conclusion générale
+
+Ce laboratoire a permis de construire progressivement un environnement DevOps autour d'une application Java.
+
+La première partie est consacrée à l'intégration continue avec Git, GitHub, Jenkins, Maven, SonarQube et Nexus.
+
+La deuxième partie introduit Docker, Trivy et Docker Swarm afin de mettre en œuvre la conteneurisation, les contrôles de sécurité et l'orchestration des conteneurs.
+
+La troisième partie porte sur Kubernetes et ses outils complémentaires. Helm facilite la gestion des ressources, Vault centralise les secrets et Argo CD permet d'appliquer les principes GitOps.
+
+Enfin, Apache JMeter complète le laboratoire avec des tests de charge exécutés localement sur la VM CentOS, indépendamment de Jenkins.
+
+L'ensemble constitue un environnement pratique permettant de comprendre les principales étapes d'un cycle DevOps, depuis la gestion du code source jusqu'au déploiement et à l'évaluation des performances de l'application.
+
+
+
+
+
+
+
+ 
+
+
+
+
+
+
+
+
+
+
+
+
