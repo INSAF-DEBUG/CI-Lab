@@ -1702,26 +1702,54 @@ Cette organisation associe l'automatisation Jenkins, la gestion des secrets avec
 
 ### 33.1 Présentation
 
-Apache JMeter est utilisé pour réaliser des tests de charge sur l'application CI-App.
+Apache JMeter est un outil open source permettant de réaliser des tests de performance et de charge sur des applications Web et des services.
 
-Contrairement aux étapes de compilation, d'analyse et de déploiement, les tests de charge sont exécutés localement et indépendamment de Jenkins.
+Dans ce laboratoire, JMeter est utilisé pour évaluer le comportement de l'application `ci-app` lorsqu'elle reçoit plusieurs requêtes HTTP simultanément.
 
-Ils sont lancés manuellement sur la machine CentOS lorsque cela est nécessaire.
+Les tests permettent notamment d'observer :
 
-Cette séparation permet de déclencher les tests de performance sans exécuter à nouveau l'ensemble du pipeline CI/CD.
+- Le nombre de requêtes exécutées ;
+- Les temps de réponse ;
+- Le débit de l'application ;
+- Le nombre de requêtes en erreur ;
+- Le comportement de l'application pendant une période de charge.
 
-### 33.2 Organisation des fichiers
+Contrairement aux pipelines Jenkins CI/CD, les tests de charge sont exécutés manuellement depuis la machine virtuelle CentOS.
 
-Les scripts d'installation et d'exécution sont regroupés dans :
+### 33.2 Architecture des tests
+
+Le principe consiste à envoyer des requêtes HTTP depuis la machine CentOS vers l'application déployée sur Kubernetes.
+
+```mermaid
+flowchart TD
+    A["Machine virtuelle CentOS"]
+    B["Apache JMeter 5.6.3"]
+    C["Scénario ci-app-load-test.jmx"]
+    D["Application ci-app"]
+    E["Kubernetes NodePort 30080"]
+    F["Fichier de résultats JTL"]
+    G["Rapport HTML"]
+
+    A --> B
+    B --> C
+    C -->|"Requêtes HTTP"| E
+    E --> D
+    D -->|"Réponses HTTP"| B
+    B --> F
+    F --> G
+```
+
+### 33.3 Organisation des fichiers
+
+Les fichiers de configuration et d'installation sont regroupés dans le répertoire :
 
 ```text
 scripts_Jmeter_Tests/
 ├── install-jmeter.sh
-├── jmeter.conf
-└── run-jmeter-tests.sh
+└── jmeter.conf
 ```
 
-Le scénario de test est conservé dans :
+Le scénario de test est conservé séparément :
 
 ```text
 tests/
@@ -1729,62 +1757,203 @@ tests/
     └── ci-app-load-test.jmx
 ```
 
-### 33.3 Architecture des tests JMeter
+### 33.4 Installation d'Apache JMeter
 
-```mermaid
-flowchart TD
-    A["VM CentOS"] --> B["run-jmeter-tests.sh"]
-    B --> C["Apache JMeter"]
-    C --> D["ci-app-load-test.jmx"]
-    D --> E["Application CI-App"]
-    E --> F["Réponses HTTP"]
-    F --> G["Résultats JTL"]
-    G --> H["Rapport HTML"]
-```
+Apache JMeter version 5.6.3 est utilisé dans ce laboratoire.
 
-### 33.4 Rôle des fichiers
+L'installation est automatisée par le script `install-jmeter.sh`.
 
-| Fichier | Fonction |
-|---|---|
-| `install-jmeter.sh` | Installe Apache JMeter |
-| `jmeter.conf` | Centralise les paramètres et les chemins |
-| `run-jmeter-tests.sh` | Lance les tests et génère les résultats |
-| `ci-app-load-test.jmx` | Définit le scénario de charge |
+Le script réalise les opérations suivantes :
 
-### 33.5 Exécution locale
+- Vérification des privilèges administrateur ;
+- Vérification de la présence de Java ;
+- Vérification de l'archive d'installation ;
+- Création du groupe système `jmeterapp` ;
+- Création de l'utilisateur système `jmeterapp` ;
+- Extraction de JMeter dans `/opt/jmeter` ;
+- Configuration des permissions ;
+- Création des répertoires de travail ;
+- Vérification de l'installation.
 
-Les tests sont exécutés depuis la VM CentOS avec le compte applicatif dédié :
+Le script doit être exécuté avec les privilèges administrateur :
 
 ```bash
-sudo -u jmeterapp bash scripts_Jmeter_Tests/run-jmeter-tests.sh
+sudo bash scripts_Jmeter_Tests/install-jmeter.sh
 ```
 
-JMeter utilise le mode non graphique afin d'exécuter le scénario sans interface utilisateur.
+La version installée peut ensuite être vérifiée avec :
 
-### 33.6 Résultats des tests
+```bash
+/opt/jmeter/bin/jmeter --version
+```
 
-Les résultats sont enregistrés dans :
+### 33.5 Configuration de JMeter
+
+Le fichier `jmeter.conf` centralise les paramètres utilisés par l'installation et les opérations de test.
+
+Les principaux paramètres sont :
+
+| Paramètre | Valeur |
+|---|---|
+| Version | `5.6.3` |
+| Utilisateur | `jmeterapp` |
+| Groupe | `jmeterapp` |
+| Répertoire d'installation | `/opt/jmeter` |
+| Répertoire des scénarios | `/opt/jmeter/tests` |
+| Répertoire des résultats | `/opt/jmeter/results` |
+| Répertoire des rapports | `/opt/jmeter/reports` |
+| Scénario | `ci-app-load-test.jmx` |
+
+Cette centralisation facilite la maintenance de la configuration et évite de répéter les chemins dans les différents scripts.
+
+### 33.6 Présentation du scénario de test
+
+Le scénario est défini dans le fichier :
+
+```text
+tests/jmeter/ci-app-load-test.jmx
+```
+
+Il contient un plan de test nommé `CI-App Load Test`.
+
+Les paramètres de charge configurés sont les suivants :
+
+| Paramètre | Valeur |
+|---|---:|
+| Nombre d'utilisateurs virtuels | 10 |
+| Durée de montée en charge | 10 secondes |
+| Nombre de répétitions | 5 |
+| Nombre total de requêtes prévues | 50 |
+| Méthode HTTP | GET |
+| Chemin demandé | `/` |
+| Port | `30080` |
+
+Le scénario utilise deux variables utilisateur :
+
+- `HOST` : adresse IP de la machine Kubernetes cible ;
+- `PORT` : port NodePort exposant l'application.
+
+Les valeurs actuellement configurées sont :
+
+```text
+HOST = 192.168.42.213
+PORT = 30080
+```
+
+La requête HTTP est donc envoyée vers :
+
+```text
+http://192.168.42.213:30080/
+```
+
+Le nombre total de requêtes prévu est calculé ainsi :
+
+```text
+10 utilisateurs × 5 répétitions = 50 requêtes
+```
+
+Ce scénario constitue un test de charge simple permettant de solliciter simultanément l'application.
+
+### 33.7 Préparation et lancement des tests
+
+Avant de lancer les tests, il faut vérifier que :
+
+- Le cluster Kubernetes est opérationnel ;
+- L'application `ci-app` est déployée ;
+- Le service NodePort est accessible depuis la machine CentOS ;
+- Le scénario JMX est disponible dans `/opt/jmeter/tests/`.
+
+Le scénario peut être copié depuis le dépôt vers le répertoire de travail :
+
+```bash
+sudo install -o jmeterapp -g jmeterapp -m 644 \
+tests/jmeter/ci-app-load-test.jmx \
+/opt/jmeter/tests/ci-app-load-test.jmx
+```
+
+Vérifier l'accessibilité de l'application :
+
+```bash
+curl -i http://192.168.42.213:30080/
+```
+
+Le test peut ensuite être exécuté en mode non graphique :
+
+```bash
+sudo -u jmeterapp /opt/jmeter/bin/jmeter \
+-n \
+-t /opt/jmeter/tests/ci-app-load-test.jmx \
+-l /opt/jmeter/results/ci-app-results.jtl \
+-j /opt/jmeter/results/ci-app-jmeter.log
+```
+
+### 33.8 Collecte des résultats
+
+Pendant l'exécution, JMeter enregistre les résultats dans un fichier au format JTL.
+
+Le répertoire utilisé est :
 
 ```text
 /opt/jmeter/results/
 ```
 
-Les rapports HTML sont générés dans :
+Le fichier JTL contient les informations relatives aux requêtes exécutées et aux réponses reçues.
 
-```text
-/opt/jmeter/reports/
+Le fichier journal permet de consulter les informations et les éventuelles erreurs rencontrées pendant l'exécution.
+
+### 33.9 Génération du rapport HTML
+
+JMeter permet de générer un rapport HTML à partir du fichier JTL.
+
+La génération peut être réalisée avec la commande suivante :
+
+```bash
+sudo -u jmeterapp /opt/jmeter/bin/jmeter \
+-g /opt/jmeter/results/ci-app-results.jtl \
+-o /opt/jmeter/reports/ci-app
 ```
 
-Les indicateurs analysés peuvent notamment comprendre :
+Le répertoire de destination du rapport doit être inexistant ou vide avant la génération.
 
-- Le nombre de requêtes exécutées ;
-- Le temps de réponse moyen ;
-- Les temps de réponse minimum et maximum ;
-- Le taux d'erreur ;
-- Le débit ;
-- Les percentiles de temps de réponse.
+Le rapport permet de visualiser les principales métriques de performance et de faciliter l'analyse des résultats.
 
-Les tests JMeter ne constituent pas une étape obligatoire du pipeline Jenkins. Ils sont réalisés à la demande, indépendamment du processus CI/CD.
+### 33.10 Analyse des résultats
+
+Les principales métriques à examiner dans le rapport JMeter sont :
+
+| Indicateur | Signification |
+|---|---|
+| Samples | Nombre de requêtes exécutées |
+| Average | Temps de réponse moyen |
+| Min | Temps de réponse minimal |
+| Max | Temps de réponse maximal |
+| Throughput | Débit des requêtes |
+| Error % | Pourcentage de requêtes en erreur |
+| Percentiles | Distribution des temps de réponse |
+
+Ces indicateurs permettent d'évaluer la réactivité de l'application et d'identifier d'éventuels problèmes lorsque plusieurs utilisateurs sollicitent le service.
+
+### 33.11 Indépendance des tests par rapport à Jenkins
+
+Les tests de charge sont exécutés manuellement depuis la machine CentOS.
+
+Ils ne sont pas intégrés comme étape automatique dans les pipelines Jenkins CI et CD.
+
+Cette organisation permet de lancer des tests de performance à la demande, indépendamment des opérations de compilation, d'analyse et de déploiement.
+
+### 33.12 Conclusion
+
+L'utilisation d'Apache JMeter complète le laboratoire DevOps par une étape d'évaluation des performances de l'application.
+
+Le scénario configuré permet de simuler dix utilisateurs virtuels effectuant chacun cinq requêtes HTTP vers l'application déployée sur Kubernetes.
+
+Les résultats collectés au format JTL peuvent ensuite être exploités pour générer un rapport HTML et analyser le comportement de l'application.
+
+
+
+
+
+
 
 ## 34. Structure globale du dépôt GitHub
 
