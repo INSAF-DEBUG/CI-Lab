@@ -4,29 +4,50 @@ Mise en place d'une chaîne d'intégration continue pour automatiser la construc
 
 ---
 
+
 ## 📋 Sommaire
 
-1. Présentation
-2. Architecture
-3. Technologies utilisées
-4. Infrastructure
-5. Structure du projet
-6. Préparation de l'environnement
-7. Git et GitHub
-8. Maven
-9. Nexus Repository
-10. Configuration Maven / Nexus
-11. Jenkins
-12. SonarQube et PostgreSQL
-13. Intégration Jenkins / SonarQube
-14. Intégration Jenkins / Nexus
-15. Pipeline CI
-16. Publication de l'artefact
-17. Gestion des erreurs
-18. Captures d'écran
-19. Résultat final
-20. Objectifs atteints
-21. Conclusion
+1. [Présentation du projet](#1-présentation-du-projet)
+2. [Architecture globale](#2-architecture)
+3. [Technologies utilisées](#3-technologies-utilisées)
+4. [Infrastructure et machines virtuelles](#4-infrastructure)
+5. [Structure du projet](#5-structure-du-projet)
+6. [Préparation de l'environnement](#6-préparation-de-lenvironnement)
+7. [Gestion du code source avec Git et GitHub](#7-git-et-github)
+8. [Construction de l'application avec Maven](#8-maven)
+9. [Gestion des artefacts avec Nexus Repository](#9-nexus-repository)
+10. [Configuration Maven / Nexus](#10-configuration-maven--nexus)
+11. [Installation et configuration de Jenkins](#11-jenkins)
+12. [Installation et configuration de SonarQube et PostgreSQL](#12-sonarqube-et-postgresql)
+13. [Intégration Jenkins / SonarQube](#13-intégration-jenkins--sonarqube)
+14. [Intégration Jenkins / Nexus](#14-intégration-jenkins--nexus)
+15. [Pipeline d'intégration continue (CI)](#15-pipeline-ci)
+16. [Publication des artefacts](#16-publication-de-lartefact)
+17. [Gestion des erreurs de la chaîne CI](#17-gestion-des-erreurs)
+18. [Captures d'écran de la chaîne CI](#18-captures-décran)
+19. [Résultat de la chaîne CI](#19-résultat-final)
+20. [Objectifs de la chaîne CI](#20-objectifs-atteints)
+21. [Conclusion de la chaîne CI](#21-conclusion)
+
+### Extension DevOps : conteneurisation, sécurité et déploiement
+
+22. [Extension du laboratoire : chaîne DevOps et déploiement](#22-extension-du-laboratoire-chaîne-devops-et-déploiement)
+23. [Architecture globale du laboratoire DevOps](#23-architecture-globale-du-laboratoire-devops)
+24. [Conteneurisation avec Docker](#24-conteneurisation-avec-docker)
+25. [Analyse de sécurité avec Trivy](#25-analyse-de-sécurité-avec-trivy)
+26. [Publication de l'image sur Docker Hub](#26-publication-de-limage-sur-docker-hub)
+27. [Déploiement avec Docker Swarm](#27-déploiement-avec-docker-swarm)
+28. [Orchestration avec Kubernetes](#28-orchestration-avec-kubernetes)
+29. [Gestion des applications avec Helm](#29-gestion-des-applications-avec-helm)
+30. [Gestion des secrets avec HashiCorp Vault](#30-gestion-des-secrets-avec-hashicorp-vault)
+31. [Déploiement GitOps avec Argo CD](#31-déploiement-gitops-avec-argo-cd)
+32. [Pipeline CD Kubernetes avec Jenkins, Vault et Argo CD](#32-pipeline-cd-kubernetes-avec-jenkins-vault-et-argo-cd)
+33. [Tests de charge avec Apache JMeter](#33-tests-de-charge-avec-apache-jmeter)
+34. [Structure globale du dépôt GitHub](#34-structure-globale-du-dépôt-github)
+35. [Synthèse des technologies utilisées](#35-synthèse-des-technologies-utilisées)
+36. [Résultat global du laboratoire](#36-résultat-global-du-laboratoire)
+37. [Conclusion générale](#37-conclusion-générale)
+
 
 ---
 
